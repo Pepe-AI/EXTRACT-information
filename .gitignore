@@ -1,0 +1,36 @@
+# Entorno virtual
+venv/
+.venv/
+env/
+
+# Variables de entorno (CONTIENE CONTRASEÑAS)
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archivos temporales
+*.tmp
+*.temp
+*.log
+
+# Archivos de test
+test_*.txt
+*.pdf
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Archivos de debug
+debug_*.py

@@ -1,0 +1,68 @@
+# ============================================
+# requirements.txt - Dependencias del proyecto
+# ============================================
+# 
+# Instalar con:
+#   pip install -r requirements.txt --break-system-packages
+#
+# O en un entorno virtual:
+#   python -m venv venv
+#   source venv/bin/activate  # Linux/Mac
+#   pip install -r requirements.txt
+# ============================================
+
+# === FRAMEWORK WEB ===
+# FastAPI: Framework moderno para APIs
+# - Rápido, tipado, documentación automática
+fastapi>=0.109.0
+
+# Uvicorn: Servidor ASGI para correr FastAPI
+# - [standard] incluye watchfiles para auto-reload
+uvicorn[standard]>=0.27.0
+
+# === VALIDACIÓN DE DATOS ===
+# Pydantic: Validación de datos con type hints
+# - Ya viene con FastAPI, pero lo especificamos por claridad
+pydantic>=2.5.0
+
+# === COMUNICACIÓN HTTP ===
+# Requests: Cliente HTTP simple
+# - Para comunicarnos con Ollama
+requests>=2.31.0
+
+# === AZURE DOCUMENT INTELLIGENCE (OCR) ===
+# Servicio de Microsoft para extraer texto de documentos
+# - Requiere credenciales configuradas en .env
+azure-ai-documentintelligence>=1.0.0b1
+azure-core>=1.29.0
+
+# === UTILIDADES ===
+# python-multipart: Para uploads de archivos en FastAPI
+python-multipart>=0.0.6
+
+# python-dotenv: Cargar variables de entorno desde .env
+python-dotenv>=1.0.0
+
+# Jinja2: Motor de templates para servir HTML
+Jinja2>=3.1.0
+
+# aiofiles: Para servir archivos estáticos de forma asíncrona
+aiofiles>=23.0.0
+
+# === DESARROLLO (OPCIONAL) ===
+# Descomenta para herramientas de desarrollo
+
+# pytest: Framework de testing
+# pytest>=7.4.0
+
+# httpx: Cliente HTTP async para tests
+# httpx>=0.26.0
+
+# black: Formateador de código
+# black>=23.12.0
+
+# isort: Ordenador de imports
+# isort>=5.13.0
+
+# mypy: Type checking estático
+# mypy>=1.8.0

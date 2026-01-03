@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extractor de Escrituras Públicas</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            color: #fff;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        header p {
+            color: #8892b0;
+            font-size: 1.1rem;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 16px;
+            padding: 30px;
+            margin-bottom: 20px;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .card h2 {
+            margin-bottom: 20px;
+            color: #00d9ff;
+            font-size: 1.3rem;
+        }
+
+        /* Upload Area */
+        .upload-area {
+            border: 2px dashed rgba(0, 217, 255, 0.5);
+            border-radius: 12px;
+            padding: 50px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .upload-area:hover {
+            border-color: #00d9ff;
+            background: rgba(0, 217, 255, 0.05);
+        }
+
+        .upload-area.dragover {
+            border-color: #00ff88;
+            background: rgba(0, 255, 136, 0.1);
+        }
+
+        .upload-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .upload-area p {
+            color: #8892b0;
+            margin-bottom: 10px;
+        }
+
+        .upload-area .filename {
+            color: #00ff88;
+            font-weight: bold;
+            margin-top: 15px;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 20px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 217, 255, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Progress */
+        .progress-container {
+            display: none;
+            margin-top: 30px;
+        }
+
+        .progress-container.active {
+            display: block;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            width: 0%;
+            transition: width 0.5s ease;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .progress-text {
+            color: #8892b0;
+            text-align: center;
+        }
+
+        /* Results */
+        .results-container {
+            display: none;
+        }
+
+        .results-container.active {
+            display: block;
+        }
+
+        .result-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .result-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-icon {
+            font-size: 2rem;
+        }
+
+        .status-text h3 {
+            font-size: 1.2rem;
+        }
+
+        .status-text p {
+            color: #8892b0;
+            font-size: 0.9rem;
+        }
+
+        .result-stats {
+            display: flex;
+            gap: 20px;
+        }
+
+        .stat {
+            text-align: center;
+            padding: 10px 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+        }
+
+        .stat-value.success {
+            color: #00ff88;
+        }
+
+        .stat-value.warning {
+            color: #ffcc00;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: #8892b0;
+        }
+
+        /* Campos */
+        .campos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .campos-section {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .campos-section h4 {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .campos-section.encontrados h4 {
+            color: #00ff88;
+        }
+
+        .campos-section.faltantes h4 {
+            color: #ff6b6b;
+        }
+
+        .campo-tag {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            margin: 3px;
+        }
+
+        .campo-tag.success {
+            background: rgba(0, 255, 136, 0.2);
+            color: #00ff88;
+        }
+
+        .campo-tag.error {
+            background: rgba(255, 107, 107, 0.2);
+            color: #ff6b6b;
+        }
+
+        /* JSON Data */
+        .json-container {
+            margin-top: 20px;
+        }
+
+        .json-toggle {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            text-align: left;
+        }
+
+        .json-toggle:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .json-content {
+            display: none;
+            margin-top: 15px;
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-x: auto;
+        }
+
+        .json-content.active {
+            display: block;
+        }
+
+        .json-content pre {
+            color: #c9d1d9;
+            font-family: 'Consolas', monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        /* Metadata */
+        .metadata {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #8892b0;
+            font-size: 0.9rem;
+        }
+
+        .meta-item span {
+            color: #fff;
+        }
+
+        /* Error */
+        .error-message {
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid rgba(255, 107, 107, 0.3);
+            border-radius: 8px;
+            padding: 20px;
+            color: #ff6b6b;
+            margin-top: 20px;
+        }
+
+        /* Health Status */
+        .health-status {
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            justify-content: center;
+        }
+
+        .health-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 15px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+
+        .health-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .health-dot.online {
+            background: #00ff88;
+            box-shadow: 0 0 10px #00ff88;
+        }
+
+        .health-dot.offline {
+            background: #ff6b6b;
+            box-shadow: 0 0 10px #ff6b6b;
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #8892b0;
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: #00d9ff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📄 Extractor de Escrituras Públicas</h1>
+            <p>Extrae información estructurada de documentos notariales usando IA</p>
+            <div class="health-status" id="healthStatus">
+                <div class="health-item">
+                    <div class="health-dot" id="ollamaDot"></div>
+                    <span>DeepSeek R1</span>
+                </div>
+                <div class="health-item">
+                    <div class="health-dot" id="azureDot"></div>
+                    <span>Azure OCR</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Upload Card -->
+        <div class="card">
+            <h2>📤 Subir Documento</h2>
+            <div class="upload-area" id="uploadArea">
+                <div class="upload-icon">📁</div>
+                <p>Arrastra tu archivo PDF aquí o haz clic para seleccionar</p>
+                <p style="font-size: 0.9rem;">Formatos soportados: PDF</p>
+                <div class="filename" id="fileName"></div>
+            </div>
+            <input type="file" id="fileInput" accept=".pdf">
+            <button class="btn btn-primary" id="extractBtn" disabled>
+                🚀 Extraer Información
+            </button>
+
+            <!-- Progress -->
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+                <p class="progress-text" id="progressText">Procesando documento...</p>
+            </div>
+        </div>
+
+        <!-- Results Card -->
+        <div class="card results-container" id="resultsContainer">
+            <h2>📊 Resultados de Extracción</h2>
+            
+            <div class="result-header">
+                <div class="result-status">
+                    <div class="status-icon" id="statusIcon">✅</div>
+                    <div class="status-text">
+                        <h3 id="statusTitle">Extracción Exitosa</h3>
+                        <p id="statusSubtitle">Validación flexible aplicada</p>
+                    </div>
+                </div>
+                <div class="result-stats">
+                    <div class="stat">
+                        <div class="stat-value success" id="camposEncontrados">0</div>
+                        <div class="stat-label">Encontrados</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value warning" id="camposFaltantes">0</div>
+                        <div class="stat-label">Faltantes</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Campos Grid -->
+            <div class="campos-grid">
+                <div class="campos-section encontrados">
+                    <h4>✅ Campos Encontrados</h4>
+                    <div id="listaEncontrados"></div>
+                </div>
+                <div class="campos-section faltantes">
+                    <h4>❌ Campos No Encontrados</h4>
+                    <div id="listaFaltantes"></div>
+                </div>
+            </div>
+
+            <!-- JSON Data -->
+            <div class="json-container">
+                <button class="json-toggle" onclick="toggleJSON()">
+                    <span>📋</span>
+                    <span>Ver Datos Extraídos (JSON)</span>
+                    <span id="jsonArrow">▼</span>
+                </button>
+                <div class="json-content" id="jsonContent">
+                    <pre id="jsonData"></pre>
+                </div>
+            </div>
+
+            <!-- Metadata -->
+            <div class="metadata">
+                <div class="meta-item">
+                    ⏱️ Tiempo: <span id="processingTime">0s</span>
+                </div>
+                <div class="meta-item">
+                    🤖 Modelo: <span id="modelUsed">-</span>
+                </div>
+                <div class="meta-item">
+                    🔄 Intentos: <span id="intentos">0</span>
+                </div>
+                <div class="meta-item">
+                    📊 Validación: <span id="tipoValidacion">-</span>
+                </div>
+            </div>
+
+            <!-- Error Message -->
+            <div class="error-message" id="errorMessage" style="display: none;"></div>
+        </div>
+
+        <footer>
+            <p>
+                API Docs: <a href="/docs" target="_blank">/docs</a> | 
+                Health: <a href="/health" target="_blank">/health</a> |
+                Powered by DeepSeek R1 + Azure Document Intelligence
+            </p>
+        </footer>
+    </div>
+
+    <script>
+        // Elements
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const extractBtn = document.getElementById('extractBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const resultsContainer = document.getElementById('resultsContainer');
+
+        let selectedFile = null;
+
+        // Check health on load
+        checkHealth();
+
+        // Upload area events
+        uploadArea.addEventListener('click', () => fileInput.click());
+        
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('dragover');
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                handleFile(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+
+        function handleFile(file) {
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                alert('Por favor, selecciona un archivo PDF');
+                return;
+            }
+            selectedFile = file;
+            fileName.textContent = `📄 ${file.name} (${formatFileSize(file.size)})`;
+            extractBtn.disabled = false;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Extract button
+        extractBtn.addEventListener('click', async () => {
+            if (!selectedFile) return;
+
+            // Show progress
+            extractBtn.disabled = true;
+            progressContainer.classList.add('active');
+            resultsContainer.classList.remove('active');
+            progressFill.style.width = '0%';
+
+            // Simulate progress steps
+            const steps = [
+                { progress: 20, text: '📄 Enviando documento...' },
+                { progress: 40, text: '🔍 Ejecutando OCR...' },
+                { progress: 60, text: '🧹 Limpiando texto...' },
+                { progress: 80, text: '🤖 DeepSeek analizando...' },
+                { progress: 90, text: '✅ Validando resultados...' }
+            ];
+
+            let stepIndex = 0;
+            const progressInterval = setInterval(() => {
+                if (stepIndex < steps.length) {
+                    progressFill.style.width = steps[stepIndex].progress + '%';
+                    progressText.textContent = steps[stepIndex].text;
+                    stepIndex++;
+                }
+            }, 2000);
+
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+
+                const response = await fetch('/extract', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                clearInterval(progressInterval);
+                progressFill.style.width = '100%';
+                progressText.textContent = '✅ Completado';
+
+                const result = await response.json();
+                
+                setTimeout(() => {
+                    progressContainer.classList.remove('active');
+                    showResults(result);
+                }, 500);
+
+            } catch (error) {
+                clearInterval(progressInterval);
+                progressContainer.classList.remove('active');
+                showResults({
+                    success: false,
+                    error: 'Error de conexión: ' + error.message
+                });
+            }
+
+            extractBtn.disabled = false;
+        });
+
+        function showResults(result) {
+            resultsContainer.classList.add('active');
+
+            // Status
+            const statusIcon = document.getElementById('statusIcon');
+            const statusTitle = document.getElementById('statusTitle');
+            const statusSubtitle = document.getElementById('statusSubtitle');
+
+            if (result.success) {
+                statusIcon.textContent = '✅';
+                statusTitle.textContent = 'Extracción Exitosa';
+                statusSubtitle.textContent = result.validacion_estricta 
+                    ? 'Validación estricta (100% campos)' 
+                    : 'Validación flexible aplicada';
+            } else {
+                statusIcon.textContent = '❌';
+                statusTitle.textContent = 'Extracción Fallida';
+                statusSubtitle.textContent = 'Revise el documento';
+            }
+
+            // Stats
+            document.getElementById('camposEncontrados').textContent = result.campos_encontrados || 0;
+            document.getElementById('camposFaltantes').textContent = (result.campos_no_encontrados || []).length;
+
+            // Campos encontrados
+            const listaEncontrados = document.getElementById('listaEncontrados');
+            const camposBase = ['notario', 'numero_escritura', 'fecha_documento', 'tipo_titular', 
+                               'titulares', 'adquirientes', 'monto_operacion', 'tipo_moneda'];
+            const faltantes = result.campos_no_encontrados || [];
+            const encontrados = camposBase.filter(c => !faltantes.includes(c));
+            
+            listaEncontrados.innerHTML = encontrados.length > 0
+                ? encontrados.map(c => `<span class="campo-tag success">${c}</span>`).join('')
+                : '<span style="color: #8892b0;">Ninguno</span>';
+
+            // Campos faltantes
+            const listaFaltantes = document.getElementById('listaFaltantes');
+            listaFaltantes.innerHTML = faltantes.length > 0
+                ? faltantes.map(c => `<span class="campo-tag error">${c}</span>`).join('')
+                : '<span style="color: #8892b0;">Ninguno</span>';
+
+            // JSON Data
+            document.getElementById('jsonData').textContent = JSON.stringify(result.data || {}, null, 2);
+
+            // Metadata
+            document.getElementById('processingTime').textContent = 
+                (result.processing_time_seconds || 0).toFixed(2) + 's';
+            document.getElementById('modelUsed').textContent = result.model_used || '-';
+            document.getElementById('intentos').textContent = result.intentos_realizados || 0;
+            document.getElementById('tipoValidacion').textContent = 
+                result.validacion_estricta ? 'Estricta ✓' : 'Flexible ⚡';
+
+            // Error message
+            const errorDiv = document.getElementById('errorMessage');
+            if (result.error) {
+                errorDiv.style.display = 'block';
+                errorDiv.textContent = '⚠️ ' + result.error;
+            } else {
+                errorDiv.style.display = 'none';
+            }
+
+            // Scroll to results
+            resultsContainer.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function toggleJSON() {
+            const content = document.getElementById('jsonContent');
+            const arrow = document.getElementById('jsonArrow');
+            content.classList.toggle('active');
+            arrow.textContent = content.classList.contains('active') ? '▲' : '▼';
+        }
+
+        async function checkHealth() {
+            try {
+                const response = await fetch('/health');
+                const health = await response.json();
+                
+                document.getElementById('ollamaDot').className = 
+                    'health-dot ' + (health.services.ollama ? 'online' : 'offline');
+                document.getElementById('azureDot').className = 
+                    'health-dot ' + (health.services.azure_ocr ? 'online' : 'offline');
+            } catch (error) {
+                document.getElementById('ollamaDot').className = 'health-dot offline';
+                document.getElementById('azureDot').className = 'health-dot offline';
+            }
+        }
+    </script>
+</body>
+</html>
