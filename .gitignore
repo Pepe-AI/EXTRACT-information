@@ -34,3 +34,6 @@ Thumbs.db
 
 # Archivos de debug
 debug_*.py
+
+#carpeta
+/o

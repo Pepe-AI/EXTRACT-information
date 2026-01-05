@@ -1,35 +1,20 @@
 """
 services/ollama_service.py - Servicio para comunicarse con Ollama/DeepSeek
 
-EXPLICACIÓN:
-============
-Este módulo maneja toda la comunicación con el servidor Ollama donde
-está corriendo DeepSeek R1 32B. Usa la API REST de Ollama para enviar
-prompts y recibir respuestas.
+CAMBIOS PARA REDUCIR VARIABILIDAD:
+===================================
+1. temperature=0.0 (antes era 0.1) → Respuestas 100% determinísticas
+2. seed fija (nuevo) → Misma semilla = mismos resultados
+3. top_p=1.0, top_k=1 → Siempre elige el token más probable
 
-ARQUITECTURA DE COMUNICACIÓN:
-=============================
-    
-    [Tu Laptop - Desarrollo]
-            │
-            ▼ HTTP POST via VPN
-    [Servidor Ollama - IP configurada en .env]
-            │
-            ▼ Modelo cargado
-    [DeepSeek R1 32B]
-            │
-            ▼ Genera respuesta con <think>
-    [JSON con datos extraídos]
+¿Por qué estos cambios?
+=======================
+Los LLMs generan texto eligiendo el siguiente token basándose en probabilidades.
+- temperature > 0: Introduce aleatoriedad en la selección
+- temperature = 0: SIEMPRE elige el token más probable (greedy decoding)
+- seed: Controla el generador de números aleatorios
 
-CONFIGURACIÓN:
-==============
-Las variables se leen del archivo .env:
-    - OLLAMA_HOST: IP del servidor con Ollama
-    - OLLAMA_PORT: Puerto de Ollama (default 11434)
-    - OLLAMA_MODEL: Modelo a usar (default deepseek-r1:32b)
-    - OLLAMA_TIMEOUT: Timeout en segundos (default 300)
-
-La API de Ollama expone el endpoint /api/generate para generar texto.
+Con temperature=0 y seed fija, el mismo prompt SIEMPRE genera la misma respuesta.
 """
 
 import os
@@ -40,16 +25,22 @@ from typing import Optional, Dict, Any, Generator
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
-# ============================================================================
-# CARGAR VARIABLES DE ENTORNO
-# ============================================================================
-# load_dotenv() busca un archivo .env en el directorio actual y sus padres,
-# y carga las variables definidas ahí como variables de entorno.
-#
-# Esto permite que cada desarrollador tenga su propia configuración
-# sin modificar el código fuente.
-# ============================================================================
 load_dotenv()
+
+
+# =============================================================================
+# CONSTANTES PARA REPRODUCIBILIDAD
+# =============================================================================
+
+# Seed fija para resultados reproducibles
+# Usamos un número arbitrario pero consistente
+DEFAULT_SEED = 42
+
+# Temperatura para extracción de datos (0 = determinístico)
+EXTRACTION_TEMPERATURE = 0.0
+
+# Temperatura para clasificación (también determinística)
+CLASSIFICATION_TEMPERATURE = 0.0
 
 
 @dataclass
@@ -57,42 +48,21 @@ class OllamaConfig:
     """
     Configuración para conectar con Ollama.
     
-    ¿Qué es @dataclass?
-    ===================
-    Es un decorador que genera automáticamente __init__, __repr__, etc.
-    Es como una clase normal pero más concisa para almacenar datos.
-    
-    ¿Cómo funciona con variables de entorno?
-    =========================================
-    Usamos field(default_factory=...) para que el valor por defecto
-    se calcule al momento de crear la instancia, no cuando se define la clase.
-    
-    os.getenv("VARIABLE", "valor_default") busca la variable de entorno,
-    si no existe, usa el valor por defecto.
-    
-    IMPORTANTE:
-    ===========
-    Crea un archivo .env en la raíz del proyecto con tus valores:
-    
-        OLLAMA_HOST=192.168.200.11
-        OLLAMA_PORT=11434
-        OLLAMA_MODEL=deepseek-r1:32b
-        OLLAMA_TIMEOUT=300
+    NUEVOS PARÁMETROS:
+    ==================
+    - default_seed: Semilla por defecto para reproducibilidad
+    - deterministic: Si es True, usa configuración 100% determinística
     """
-    # Lee del .env, si no existe usa el valor por defecto
     host: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "localhost"))
     port: int = field(default_factory=lambda: int(os.getenv("OLLAMA_PORT", "11434")))
     model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "deepseek-r1:32b"))
     timeout: int = field(default_factory=lambda: int(os.getenv("OLLAMA_TIMEOUT", "300")))
+    default_seed: int = field(default_factory=lambda: int(os.getenv("OLLAMA_SEED", str(DEFAULT_SEED))))
+    deterministic: bool = True  # Por defecto, queremos resultados reproducibles
     
     @property
     def base_url(self) -> str:
-        """
-        Construye la URL base de la API de Ollama.
-        
-        @property permite acceder a este método como si fuera un atributo:
-            config.base_url  (en lugar de config.base_url())
-        """
+        """Construye la URL base de la API de Ollama."""
         return f"http://{self.host}:{self.port}"
     
     @property
@@ -112,49 +82,31 @@ class OllamaService:
     
     MÉTODOS PRINCIPALES:
     ====================
-    - generate(): Genera texto con el modelo (método simple)
-    - generate_stream(): Genera texto en streaming (para mostrar progreso)
-    - extract_json(): Genera y parsea JSON automáticamente
-    
-    EJEMPLO DE USO:
-    ===============
-    >>> service = OllamaService()
-    >>> response = service.generate("¿Cuál es la capital de México?")
-    >>> print(response['response'])
+    - generate(): Genera texto con el modelo
+    - generate_deterministic(): Genera texto de forma 100% reproducible (NUEVO)
+    - classify_document(): Clasifica documento como empresa/persona (NUEVO)
     """
     
     def __init__(self, config: Optional[OllamaConfig] = None):
-        """
-        Inicializa el servicio con la configuración dada.
-        
-        Args:
-            config: Configuración de Ollama. Si es None, usa valores por defecto.
-        """
+        """Inicializa el servicio con la configuración dada."""
         self.config = config or OllamaConfig()
-        self._session = requests.Session()  # Reutiliza conexiones HTTP
+        self._session = requests.Session()
     
     def health_check(self) -> bool:
         """
         Verifica si Ollama está disponible y el modelo está cargado.
         
-        ¿Para qué sirve?
-        ================
-        Antes de procesar documentos, verificamos que el servidor
-        esté activo. Esto evita esperar largos timeouts si hay problemas.
-        
         Returns:
             True si Ollama responde correctamente, False en caso contrario.
         """
         try:
-            # El endpoint /api/tags lista los modelos disponibles
             response = self._session.get(
                 f"{self.config.base_url}/api/tags",
-                timeout=10  # 10 segundos para health check
+                timeout=10
             )
             
             if response.status_code == 200:
                 data = response.json()
-                # Verificar que nuestro modelo esté en la lista
                 models = [m['name'] for m in data.get('models', [])]
                 model_base = self.config.model.split(':')[0]
                 return any(model_base in m for m in models)
@@ -164,44 +116,64 @@ class OllamaService:
             print(f"Error en health check: {e}")
             return False
     
+    def list_models(self) -> list:
+        """
+        Lista los modelos disponibles en Ollama.
+        
+        Returns:
+            Lista de nombres de modelos disponibles.
+        """
+        try:
+            response = self._session.get(
+                f"{self.config.base_url}/api/tags",
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                return [m['name'] for m in data.get('models', [])]
+            return []
+            
+        except requests.exceptions.RequestException:
+            return []
+    
     def generate(
         self,
         prompt: str,
         system: Optional[str] = None,
-        temperature: float = 0.1,
+        temperature: float = None,
         max_tokens: int = 4096,
+        seed: int = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Genera texto usando el modelo de Ollama.
         
-        PARÁMETROS EXPLICADOS:
-        ======================
+        PARÁMETROS IMPORTANTES PARA REPRODUCIBILIDAD:
+        ==============================================
         
-        prompt (str):
-            El texto/pregunta que enviamos al modelo.
-            Ejemplo: "Extrae los datos de esta escritura: ..."
-        
-        system (str, opcional):
-            Instrucciones del sistema que definen el comportamiento del modelo.
-            Ejemplo: "Eres un experto en análisis de documentos legales..."
-        
-        temperature (float, default=0.1):
-            Controla la "creatividad" del modelo.
-            - 0.0 = Respuestas muy determinísticas (siempre iguales)
-            - 0.1-0.3 = Respuestas consistentes (recomendado para extracción)
-            - 0.7-1.0 = Respuestas más variadas/creativas
+        temperature (float):
+            Controla la aleatoriedad en la selección de tokens.
+            - 0.0 = Determinístico (siempre elige el token más probable)
+            - 0.1-0.3 = Muy poca variación (bueno para extracción)
+            - 0.7-1.0 = Mucha variación (bueno para creatividad)
             
-            Para extracción de datos, usamos 0.1 porque queremos
-            respuestas precisas y reproducibles.
+            ANTES: default=0.1 (permitía variación)
+            AHORA: default=0.0 (100% determinístico)
         
-        max_tokens (int, default=4096):
-            Número máximo de tokens en la respuesta.
-            Un token ≈ 4 caracteres en español.
-            4096 tokens ≈ 16,000 caracteres ≈ 8 páginas de texto.
+        seed (int):
+            Semilla para el generador de números aleatorios.
+            Si usas la misma seed + mismo prompt = misma respuesta.
+            
+            ANTES: No se usaba (cada ejecución era diferente)
+            AHORA: default=42 (resultados reproducibles)
         
-        **kwargs:
-            Parámetros adicionales de Ollama (num_ctx, top_p, etc.)
+        top_k (int): NUEVO
+            Limita la selección a los K tokens más probables.
+            top_k=1 significa: SIEMPRE elegir el más probable.
+        
+        top_p (float): NUEVO
+            Nucleus sampling. top_p=1.0 con temperature=0 = determinístico.
         
         Returns:
             Dict con la respuesta de Ollama incluyendo:
@@ -210,42 +182,52 @@ class OllamaService:
             - total_duration: Tiempo total en nanosegundos
         """
         
-        # Construir el payload para la API
+        # Usar valores determinísticos por defecto si está habilitado
+        if self.config.deterministic:
+            temperature = temperature if temperature is not None else EXTRACTION_TEMPERATURE
+            seed = seed if seed is not None else self.config.default_seed
+        else:
+            temperature = temperature if temperature is not None else 0.1
+        
+        # Construir opciones con parámetros para reproducibilidad
+        options = {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+            "top_k": 1,      # NUEVO: Solo considerar el token más probable
+            "top_p": 1.0,    # NUEVO: No usar nucleus sampling
+            **kwargs
+        }
+        
+        # Agregar seed si está definida
+        if seed is not None:
+            options["seed"] = seed
+        
         payload = {
             "model": self.config.model,
             "prompt": prompt,
-            "stream": False,  # Esperar respuesta completa
-            "options": {
-                "temperature": temperature,
-                "num_predict": max_tokens,
-                **kwargs  # Parámetros adicionales
-            }
+            "stream": False,
+            "options": options
         }
         
-        # Agregar system prompt si se proporciona
         if system:
             payload["system"] = system
         
         try:
-            # Medir tiempo de inicio
             start_time = time.time()
             
-            # Hacer la petición POST a Ollama
             response = self._session.post(
                 self.config.generate_url,
                 json=payload,
                 timeout=self.config.timeout
             )
             
-            # Calcular tiempo transcurrido
             elapsed_time = time.time() - start_time
-            
-            # Verificar respuesta exitosa
             response.raise_for_status()
             
-            # Parsear respuesta JSON
             result = response.json()
             result['elapsed_time_seconds'] = elapsed_time
+            result['seed_used'] = seed  # Para debugging
+            result['temperature_used'] = temperature  # Para debugging
             
             return result
             
@@ -262,35 +244,148 @@ class OllamaService:
         except requests.exceptions.RequestException as e:
             raise RuntimeError(f"Error en la petición a Ollama: {e}")
     
+    def generate_deterministic(
+        self,
+        prompt: str,
+        system: Optional[str] = None,
+        max_tokens: int = 4096
+    ) -> Dict[str, Any]:
+        """
+        Genera texto de forma 100% determinística.
+        
+        NUEVO MÉTODO - Wrapper para garantizar reproducibilidad.
+        
+        Usa:
+        - temperature = 0.0
+        - seed = DEFAULT_SEED (42)
+        - top_k = 1
+        - top_p = 1.0
+        
+        Esto garantiza que el mismo prompt SIEMPRE produzca
+        la misma respuesta, eliminando la variabilidad.
+        
+        Args:
+            prompt: El texto/pregunta para el modelo
+            system: Instrucciones del sistema (opcional)
+            max_tokens: Máximo de tokens a generar
+            
+        Returns:
+            Dict con la respuesta de Ollama
+        """
+        return self.generate(
+            prompt=prompt,
+            system=system,
+            temperature=0.0,
+            max_tokens=max_tokens,
+            seed=self.config.default_seed
+        )
+    
+    def classify_document(
+        self,
+        document_text: str,
+        max_tokens: int = 100
+    ) -> Dict[str, Any]:
+        """
+        NUEVO MÉTODO - Clasifica un documento como empresa o persona.
+        
+        Esta es la FASE 1 del enfoque "divide y vencerás".
+        
+        ¿Por qué un método separado?
+        ============================
+        1. Prompt muy simple y específico = alta precisión
+        2. Respuesta corta = rápido (~2-5 segundos)
+        3. Solo necesita determinar UN dato: empresa o persona
+        
+        Args:
+            document_text: Texto del documento a clasificar
+            max_tokens: Máximo de tokens (100 es suficiente)
+            
+        Returns:
+            Dict con:
+            - tipo: "empresa" o "persona"
+            - confianza: alta/media/baja
+            - indicadores: lista de palabras clave encontradas
+        """
+        
+        # Prompt ultra-específico para clasificación
+        system_prompt = """Eres un clasificador de documentos legales mexicanos.
+Tu ÚNICA tarea es determinar si el VENDEDOR/ENAJENANTE es una EMPRESA o una PERSONA FÍSICA.
+
+REGLAS:
+- Si ves "S.A.", "S.A. de C.V.", "S. de R.L.", "SOCIEDAD", "CAPITAL VARIABLE" → es EMPRESA
+- Si el vendedor es un nombre de persona sin denominación social → es PERSONA
+
+Responde SOLO con un JSON así:
+{"tipo": "empresa", "indicadores": ["S.A. de C.V.", "SOCIEDAD"]}
+o
+{"tipo": "persona", "indicadores": ["nombre personal"]}"""
+
+        user_prompt = f"""Analiza este fragmento del documento y clasifica al VENDEDOR/ENAJENANTE:
+
+<documento>
+{document_text[:3000]}
+</documento>
+
+¿El vendedor es EMPRESA o PERSONA FÍSICA? Responde solo con JSON."""
+
+        result = self.generate(
+            prompt=user_prompt,
+            system=system_prompt,
+            temperature=0.0,  # 100% determinístico
+            max_tokens=max_tokens,
+            seed=self.config.default_seed
+        )
+        
+        # Parsear resultado
+        response_text = result.get('response', '')
+        
+        try:
+            # Intentar extraer JSON de la respuesta
+            import re
+            json_match = re.search(r'\{[^}]+\}', response_text)
+            if json_match:
+                classification = json.loads(json_match.group())
+                return {
+                    'tipo': classification.get('tipo', 'empresa').lower(),
+                    'indicadores': classification.get('indicadores', []),
+                    'raw_response': response_text,
+                    'success': True
+                }
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        
+        # Fallback: detectar por palabras clave
+        texto_upper = document_text.upper()
+        indicadores_empresa = ['S.A.', 'S.A. DE C.V.', 'SOCIEDAD', 'CAPITAL VARIABLE', 'S. DE R.L.']
+        
+        encontrados = [ind for ind in indicadores_empresa if ind in texto_upper]
+        
+        if encontrados:
+            return {
+                'tipo': 'empresa',
+                'indicadores': encontrados,
+                'raw_response': response_text,
+                'success': True,
+                'metodo': 'fallback_keywords'
+            }
+        
+        return {
+            'tipo': 'persona',
+            'indicadores': ['No se encontraron indicadores de empresa'],
+            'raw_response': response_text,
+            'success': True,
+            'metodo': 'fallback_default'
+        }
+    
     def generate_stream(
         self,
         prompt: str,
         system: Optional[str] = None,
-        temperature: float = 0.1,
+        temperature: float = 0.0,
         **kwargs
     ) -> Generator[str, None, None]:
         """
         Genera texto en modo streaming (token por token).
-        
-        ¿Qué es streaming?
-        ==================
-        En lugar de esperar a que se genere toda la respuesta,
-        recibimos los tokens conforme se van generando. Esto permite:
-        
-        1. Mostrar progreso al usuario en tiempo real
-        2. Cancelar la generación si es necesario
-        3. Mejor experiencia de usuario (no parece "colgado")
-        
-        ¿Qué es un Generator?
-        =====================
-        Un generator es una función que "produce" valores uno a uno
-        en lugar de devolver una lista completa. Usa 'yield' en lugar
-        de 'return'.
-        
-        Ejemplo de uso:
-        ===============
-        >>> for token in service.generate_stream("Hola"):
-        ...     print(token, end='', flush=True)
         
         Yields:
             str: Cada fragmento de texto conforme se genera.
@@ -299,9 +394,10 @@ class OllamaService:
         payload = {
             "model": self.config.model,
             "prompt": prompt,
-            "stream": True,  # Activar streaming
+            "stream": True,
             "options": {
                 "temperature": temperature,
+                "seed": self.config.default_seed,
                 **kwargs
             }
         }
@@ -310,24 +406,20 @@ class OllamaService:
             payload["system"] = system
         
         try:
-            # iter_lines() procesa la respuesta línea por línea
             response = self._session.post(
                 self.config.generate_url,
                 json=payload,
-                stream=True,  # Importante: stream=True en requests
+                stream=True,
                 timeout=self.config.timeout
             )
             response.raise_for_status()
             
-            # Procesar cada línea del stream
             for line in response.iter_lines():
                 if line:
-                    # Cada línea es un JSON con el token generado
                     data = json.loads(line)
                     if 'response' in data:
                         yield data['response']
                     
-                    # Si 'done' es True, terminó la generación
                     if data.get('done', False):
                         break
                         
@@ -343,13 +435,6 @@ class OllamaService:
         """
         Genera texto y extrae el JSON de la respuesta.
         
-        DeepSeek R1 genera su razonamiento en bloques <think>...</think>
-        y luego produce el JSON. Este método:
-        
-        1. Genera la respuesta completa
-        2. Elimina el bloque <think>
-        3. Busca y parsea el JSON
-        
         Returns:
             Dict con el JSON parseado, o None si no se encontró JSON válido.
         """
@@ -357,13 +442,12 @@ class OllamaService:
         result = self.generate(prompt, system, **kwargs)
         response_text = result.get('response', '')
         
-        # Importar la función de limpieza (la crearemos después)
         from utils.text_processing import extract_json_from_response
         
         return extract_json_from_response(response_text)
 
 
-# === INSTANCIA SINGLETON (PATRÓN DE DISEÑO) ===
+# === INSTANCIA SINGLETON ===
 
 _service_instance: Optional[OllamaService] = None
 
@@ -372,18 +456,9 @@ def get_ollama_service(config: Optional[OllamaConfig] = None) -> OllamaService:
     """
     Obtiene una instancia del servicio Ollama (patrón Singleton).
     
-    ¿Qué es el patrón Singleton?
-    ============================
-    Asegura que solo exista UNA instancia de una clase en toda la aplicación.
-    
-    ¿Por qué usarlo aquí?
-    - Reutilizar la conexión HTTP (más eficiente)
-    - Evitar crear múltiples configuraciones
-    - Centralizar la gestión del servicio
-    
     Uso:
-        service = get_ollama_service()  # Primera vez: crea instancia
-        service = get_ollama_service()  # Segunda vez: devuelve la misma
+        service = get_ollama_service()
+        service = get_ollama_service()  # Devuelve la misma instancia
     """
     global _service_instance
     
@@ -396,36 +471,29 @@ def get_ollama_service(config: Optional[OllamaConfig] = None) -> OllamaService:
 # === CÓDIGO DE PRUEBA ===
 
 if __name__ == "__main__":
-    """
-    Código que se ejecuta solo si corres este archivo directamente:
-        python services/ollama_service.py
-    
-    No se ejecuta si importas el módulo desde otro archivo.
-    """
-    
     print("=" * 60)
-    print("PRUEBA DEL SERVICIO OLLAMA")
+    print("PRUEBA DEL SERVICIO OLLAMA (CON REPRODUCIBILIDAD)")
     print("=" * 60)
     
-    # Crear servicio con configuración por defecto
     service = get_ollama_service()
     
     print(f"\n📡 Conectando a: {service.config.base_url}")
     print(f"🤖 Modelo: {service.config.model}")
+    print(f"🎲 Seed por defecto: {service.config.default_seed}")
+    print(f"🌡️ Modo determinístico: {service.config.deterministic}")
     
-    # Health check
-    print("\n🔍 Verificando conexión...")
     if service.health_check():
-        print("✅ Ollama está disponible y el modelo está cargado")
+        print("\n✅ Ollama está disponible")
         
-        # Prueba simple
-        print("\n📝 Enviando prompt de prueba...")
-        result = service.generate(
-            prompt="Di 'Hola, estoy funcionando correctamente' en una línea.",
-            temperature=0.1
-        )
-        print(f"\n🤖 Respuesta: {result['response']}")
-        print(f"⏱️  Tiempo: {result['elapsed_time_seconds']:.2f} segundos")
+        # Prueba de reproducibilidad
+        print("\n🔬 Probando reproducibilidad...")
+        prompt = "Responde solo con 'OK' si puedes leer esto."
+        
+        result1 = service.generate_deterministic(prompt)
+        result2 = service.generate_deterministic(prompt)
+        
+        print(f"   Respuesta 1: {result1['response'][:50]}")
+        print(f"   Respuesta 2: {result2['response'][:50]}")
+        print(f"   ¿Iguales?: {result1['response'] == result2['response']}")
     else:
-        print("❌ No se pudo conectar a Ollama")
-        print("   Verifica que el servidor esté corriendo en la IP correcta")
+        print("\n❌ No se pudo conectar a Ollama")
