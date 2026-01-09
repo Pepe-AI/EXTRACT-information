@@ -1,31 +1,26 @@
 """
 utils/prompt_builder.py - Constructor de prompts para extracción de escrituras
 
-VERSIÓN MEJORADA - SISTEMA HÍBRIDO (Plan A + C)
-===============================================
-
-Este módulo construye los prompts que se envían a DeepSeek R1.
-Ahora soporta el flujo de DOS FASES:
-
-FASE 1: Clasificación (usa utils/clasificador.py)
-- Determina si el titular es empresa o persona
-- Identifica quién es titular y quién es representante
-
-FASE 2: Extracción (usa este módulo)
-- Construye prompt específico según la clasificación
-- Incluye la clasificación como "información confirmada"
-- El LLM ya sabe quién es quién, solo extrae detalles
-
-MEJORAS RESPECTO A LA VERSIÓN ANTERIOR:
+VERSIÓN CORREGIDA - ESTRUCTURA ESTRICTA
 =======================================
-1. Prompts específicos para EMPRESA vs PERSONA
-2. Ejemplos de instituciones gubernamentales (no solo S.A. de C.V.)
-3. Errores comunes documentados con ejemplos
-4. Soporte para clasificación previa
+
+PROBLEMA ANTERIOR:
+==================
+El LLM agregaba campos extra como:
+- "representante_legal" (debe ir dentro de "representante")
+- "documento" (estructura completa no solicitada)
+- "gestora_negocios", "inmueble", "firmas", etc.
+
+SOLUCIÓN:
+=========
+1. Prompts MUY ESTRICTOS que enfatizan NO agregar campos
+2. JSON de ejemplo EXACTO sin variaciones
+3. Lista explícita de campos prohibidos
+4. Función limpiar_json_extra() para eliminar campos no permitidos
 """
 
 import json
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
 
 
 # =============================================================================
@@ -34,163 +29,31 @@ from typing import Tuple, Dict, Any, Optional
 
 NO_ENCONTRADO = "NO SE ENCONTRÓ DATO"
 
-
-# =============================================================================
-# SYSTEM PROMPTS
-# =============================================================================
-
-SYSTEM_PROMPT_EXTRACCION = """Eres un extractor de datos especializado en documentos notariales mexicanos.
-
-Tu tarea es analizar escrituras públicas y extraer información estructurada en formato JSON.
-
-REGLAS FUNDAMENTALES:
-1. Responde SOLO con JSON válido, sin texto adicional antes o después
-2. Usa EXACTAMENTE los nombres de campos que se te indican
-3. Si no encuentras un dato, usa null o "NO SE ENCONTRÓ DATO"
-4. numero_escritura debe ser INTEGER (sin comillas)
-5. El REPRESENTANTE siempre es una PERSONA FÍSICA (nunca una institución)
-
-REGLA CRÍTICA PARA tipo_titular:
-- "empresa" = Cualquier entidad que NO sea persona física:
-  * Sociedades: S.A., S.A. de C.V., S. de R.L.
-  * Instituciones: Instituto, Secretaría, Gobierno
-  * Organismos: INFONAVIT, FOVISSSTE, INSS
-  * Fideicomisos, Fondos, Asociaciones (A.C.)
-  
-- "persona" = SOLO personas físicas actuando por sí mismas"""
-
-
-SYSTEM_PROMPT_EMPRESA = """Eres un extractor de datos de escrituras públicas mexicanas.
-El documento que analizarás es de una EMPRESA o INSTITUCIÓN.
-
-REGLAS PARA EMPRESA/INSTITUCIÓN:
-1. tipo_titular SIEMPRE es "empresa"
-2. El representante es OBLIGATORIO (quien firma por la entidad)
-3. El representante es una PERSONA FÍSICA, nunca otra institución
-4. numero_escritura es INTEGER (sin comillas)
-
-Responde SOLO con el JSON, sin explicaciones."""
-
-
-SYSTEM_PROMPT_PERSONA = """Eres un extractor de datos de escrituras públicas mexicanas.
-El documento que analizarás es de una PERSONA FÍSICA.
-
-REGLAS PARA PERSONA:
-1. tipo_titular SIEMPRE es "persona"
-2. El representante es OPCIONAL:
-   - Si actúa "por derecho propio" → representante es null
-   - Si tiene apoderado → incluir datos del representante
-3. numero_escritura es INTEGER (sin comillas)
-
-Responde SOLO con el JSON, sin explicaciones."""
-
-
-# =============================================================================
-# PLANTILLAS JSON
-# =============================================================================
-
-PLANTILLA_JSON_EMPRESA = {
-    "notario": "NOMBRE_DEL_NOTARIO",
-    "numero_escritura": 0,
-    "fecha_documento": "DD de MES de AAAA",
-    "tipo_titular": "empresa",
-    "titulares": [
-        {
-            "nombre": "RAZÓN_SOCIAL_O_NOMBRE_DE_LA_INSTITUCIÓN",
-            "actua_por": "representación",
-            "representante": {
-                "nombre": "NOMBRE_DE_LA_PERSONA_QUE_FIRMA",
-                "en_calidad": "apoderado legal / representante / director",
-                "escritura": "NÚMERO_ESCRITURA_DEL_PODER",
-                "bis": False,
-                "fecha_poder": "FECHA_DEL_PODER"
-            }
-        }
-    ],
-    "adquirientes": [
-        {
-            "nombre": "NOMBRE_DEL_COMPRADOR",
-            "estado_civil": "casado/soltero/etc",
-            "tipo_sociedad": "sociedad conyugal o null",
-            "edad": None,
-            "rfc": "RFC_O_false",
-            "curp": "CURP_O_false"
-        }
-    ],
-    "monto_operacion": "$XXX,XXX.XX",
-    "tipo_moneda": "MXN",
-    "valor_catastral": None
+# Campos permitidos en cada nivel (para validación y limpieza)
+CAMPOS_RAIZ_PERMITIDOS = {
+    "notario", "numero_escritura", "fecha_documento", "tipo_titular",
+    "titulares", "adquirientes", "monto_operacion", "tipo_moneda", "valor_catastral"
 }
 
+CAMPOS_TITULAR_PERMITIDOS = {
+    "nombre", "actua_por", "representante"
+}
 
-PLANTILLA_JSON_PERSONA = {
-    "notario": "NOMBRE_DEL_NOTARIO",
-    "numero_escritura": 0,
-    "fecha_documento": "DD de MES de AAAA",
-    "tipo_titular": "persona",
-    "titulares": [
-        {
-            "nombre": "NOMBRE_DE_LA_PERSONA_FÍSICA",
-            "actua_por": "derecho propio",
-            "representante": None
-        }
-    ],
-    "adquirientes": [
-        {
-            "nombre": "NOMBRE_DEL_COMPRADOR",
-            "estado_civil": "casado/soltero/etc",
-            "tipo_sociedad": "sociedad conyugal o null",
-            "edad": None,
-            "rfc": "RFC_O_false",
-            "curp": "CURP_O_false"
-        }
-    ],
-    "monto_operacion": "$XXX,XXX.XX",
-    "tipo_moneda": "MXN",
-    "valor_catastral": None
+CAMPOS_REPRESENTANTE_PERMITIDOS = {
+    "nombre", "en_calidad", "escritura", "bis", "fecha_poder"
+}
+
+CAMPOS_ADQUIRIENTE_PERMITIDOS = {
+    "nombre", "estado_civil", "tipo_sociedad", "edad", "rfc", "curp"
 }
 
 
 # =============================================================================
-# EJEMPLOS COMPLETOS
+# EJEMPLOS JSON EXACTOS
 # =============================================================================
 
-EJEMPLO_EMPRESA_SA = {
-    "notario": "Lic. Roberto García Mendoza",
-    "numero_escritura": 3125,
-    "fecha_documento": "15 de mayo de 2024",
-    "tipo_titular": "empresa",
-    "titulares": [
-        {
-            "nombre": "Inmobiliaria del Norte S.A. de C.V.",
-            "actua_por": "representación",
-            "representante": {
-                "nombre": "Juan Carlos Pérez López",
-                "en_calidad": "apoderado legal",
-                "escritura": "1234",
-                "bis": False,
-                "fecha_poder": "10 de enero de 2020"
-            }
-        }
-    ],
-    "adquirientes": [
-        {
-            "nombre": "Carlos Rodríguez Martínez",
-            "estado_civil": "casado",
-            "tipo_sociedad": "sociedad conyugal",
-            "edad": 45,
-            "rfc": "ROMC790515ABC",
-            "curp": "ROMC790515HDFRRL09"
-        }
-    ],
-    "monto_operacion": "$1,500,000.00",
-    "tipo_moneda": "MXN",
-    "valor_catastral": "$800,000.00"
-}
-
-
-EJEMPLO_INSTITUCION_GOBIERNO = {
-    "notario": "Lic. Rigoberto Ochoa Torres",
+EJEMPLO_JSON_EMPRESA = {
+    "notario": "RIGOBERTO OCHOA TORRES",
     "numero_escritura": 2397,
     "fecha_documento": "5 de mayo de 2023",
     "tipo_titular": "empresa",
@@ -222,177 +85,98 @@ EJEMPLO_INSTITUCION_GOBIERNO = {
     "valor_catastral": None
 }
 
+EJEMPLO_JSON_EMPRESA_2 = {
+    "notario": "FERNANDO CASTRO RUBIO",
+    "numero_escritura": 2736,
+    "fecha_documento": "13 de marzo de 2024",
+    "tipo_titular": "empresa",
+    "titulares": [
+        {
+            "nombre": "KUBBOX ARQUITECTURA, SOCIEDAD ANONIMA DE CAPITAL VARIABLE",
+            "actua_por": "apoderado",
+            "representante": {
+                "nombre": "ROSA HERLINDA DURAN GEBBIA",
+                "en_calidad": "apoderado",
+                "escritura": "21695",
+                "bis": False,
+                "fecha_poder": "14 de octubre de 2021"
+            }
+        }
+    ],
+    "adquirientes": [
+        {
+            "nombre": "BEATRIZ PICHARDO MENDOZA",
+            "estado_civil": "casada",
+            "tipo_sociedad": "separación de bienes",
+            "edad": None,
+            "rfc": False,
+            "curp": False
+        }
+    ],
+    "monto_operacion": "$3,100,000.00",
+    "tipo_moneda": "MXN",
+    "valor_catastral": None
+}
 
-EJEMPLO_PERSONA_FISICA = {
-    "notario": "Lic. María López Hernández",
+EJEMPLO_JSON_PERSONA = {
+    "notario": "María López Hernández",
     "numero_escritura": 5432,
     "fecha_documento": "20 de junio de 2024",
     "tipo_titular": "persona",
     "titulares": [
         {
-            "nombre": "Ana García López",
+            "nombre": "Juan Carlos Pérez García",
             "actua_por": "derecho propio",
             "representante": None
         }
     ],
     "adquirientes": [
         {
-            "nombre": "Pedro Sánchez Ruiz",
-            "estado_civil": "soltero",
+            "nombre": "Ana María Rodríguez López",
+            "estado_civil": "soltera",
             "tipo_sociedad": None,
             "edad": 35,
-            "rfc": "SARP890101XYZ",
+            "rfc": "ROLA890515ABC",
             "curp": False
         }
     ],
-    "monto_operacion": "$500,000.00",
+    "monto_operacion": "$1,200,000.00",
     "tipo_moneda": "MXN",
-    "valor_catastral": "$300,000.00"
-}
-
-
-EJEMPLO_PERSONA_CON_APODERADO = {
-    "notario": "Lic. Fernando Ruiz Castillo",
-    "numero_escritura": 7891,
-    "fecha_documento": "10 de julio de 2024",
-    "tipo_titular": "persona",
-    "titulares": [
-        {
-            "nombre": "María Elena Gutiérrez Flores",
-            "actua_por": "representación",
-            "representante": {
-                "nombre": "Roberto Martínez García",
-                "en_calidad": "apoderado general",
-                "escritura": "3456",
-                "bis": False,
-                "fecha_poder": "15 de marzo de 2022"
-            }
-        }
-    ],
-    "adquirientes": [
-        {
-            "nombre": "Carlos López Mendoza",
-            "estado_civil": "casado",
-            "tipo_sociedad": "sociedad conyugal",
-            "edad": 42,
-            "rfc": "LOMC820315XYZ",
-            "curp": False
-        }
-    ],
-    "monto_operacion": "$2,500,000.00",
-    "tipo_moneda": "MXN",
-    "valor_catastral": None
+    "valor_catastral": "$950,000.00"
 }
 
 
 # =============================================================================
-# ERRORES COMUNES
+# SYSTEM PROMPT ESTRICTO
 # =============================================================================
 
-def _build_errores_comunes() -> str:
-    """
-    Lista de errores comunes que el LLM debe evitar.
-    
-    Estos errores fueron identificados en extracciones reales.
-    """
-    
-    return """
-========================================
-⚠️ ERRORES QUE NO DEBES COMETER:
-========================================
+SYSTEM_PROMPT_ESTRICTO = """Eres un extractor de datos de escrituras públicas mexicanas.
 
-ERROR 1 - Poner tipo_titular dentro de cada titular:
-❌ INCORRECTO:
-{
-  "titulares": [
-    { "tipo_titular": "empresa", "nombre": "..." }
-  ]
-}
+REGLAS ABSOLUTAS QUE DEBES SEGUIR:
 
-✅ CORRECTO:
-{
-  "tipo_titular": "empresa",
-  "titulares": [
-    { "nombre": "..." }
-  ]
-}
+1. Responde ÚNICAMENTE con un objeto JSON válido
+2. NO agregues campos que no estén en la plantilla
+3. NO crees estructuras anidadas adicionales como "documento", "inmueble", "firmas"
+4. USA EXACTAMENTE los nombres de campos que te indico
+5. Si no encuentras un dato, usa null o "NO SE ENCONTRÓ DATO"
 
-----------------------------------------
+CAMPOS PROHIBIDOS (NUNCA LOS USES):
+- representante_legal (el representante va DENTRO del objeto "representante")
+- gestora_negocios
+- documento
+- inmueble
+- firmas
+- partes
+- vendedor
+- comprador
+- jurisdiccion
+- domicilio_notificaciones
+- impuestos
 
-ERROR 2 - Confundir TITULAR con REPRESENTANTE:
-Cuando una institución actúa a través de una persona:
-- TITULAR = La institución/empresa (quien tiene el derecho)
-- REPRESENTANTE = La persona física que firma
+El JSON debe tener EXACTAMENTE 9 campos en la raíz, no más."""
 
-❌ INCORRECTO (al revés):
-{
-  "tipo_titular": "persona",
-  "titulares": [
-    {
-      "nombre": "Ernesto Padilla",
-      "representante": { "nombre": "Instituto Nacional..." }
-    }
-  ]
-}
-
-✅ CORRECTO:
-{
-  "tipo_titular": "empresa",
-  "titulares": [
-    {
-      "nombre": "Instituto Nacional del Suelo Sustentable",
-      "representante": { "nombre": "Ernesto Padilla Aceves" }
-    }
-  ]
-}
-
-----------------------------------------
-
-ERROR 3 - Clasificar instituciones como "persona":
-Las instituciones gubernamentales son "empresa", NO "persona"
-
-❌ INCORRECTO:
-{ "tipo_titular": "persona" }  // Para INSS, INFONAVIT, Secretarías, etc.
-
-✅ CORRECTO:
-{ "tipo_titular": "empresa" }  // Para cualquier institución u organismo
-
-RECUERDA: tipo_titular="empresa" incluye:
-- S.A., S.A. de C.V., S. de R.L.
-- Instituto, Secretaría, Gobierno
-- INFONAVIT, FOVISSSTE, INSS
-- Fideicomisos, Fondos, A.C.
-
-----------------------------------------
-
-ERROR 4 - Poner institución como representante:
-El representante siempre es una PERSONA FÍSICA
-
-❌ INCORRECTO:
-{
-  "representante": { "nombre": "Instituto Nacional..." }
-}
-
-✅ CORRECTO:
-{
-  "representante": { "nombre": "Juan Pérez López" }
-}
-
-----------------------------------------
-
-ERROR 5 - Usar nombres de campos incorrectos:
-❌ INCORRECTO: "nombre_titular", "nombre_completo", "razon_social"
-✅ CORRECTO: "nombre"
-
-❌ INCORRECTO: "num_escritura", "no_escritura"
-✅ CORRECTO: "numero_escritura"
-
-----------------------------------------
-
-ERROR 6 - numero_escritura como string:
-❌ INCORRECTO: "numero_escritura": "3125"
-✅ CORRECTO: "numero_escritura": 3125
-"""
+# Alias para compatibilidad
+SYSTEM_PROMPT_EXTRACCION = SYSTEM_PROMPT_ESTRICTO
 
 
 # =============================================================================
@@ -407,144 +191,319 @@ def build_extraction_prompt(
     include_examples: bool = True
 ) -> Tuple[str, str]:
     """
-    Construye el prompt de extracción.
-    
-    MODO HÍBRIDO:
-    =============
-    Si se proporciona tipo_titular (de la Fase 1), construye un prompt
-    específico que incluye la clasificación como "información confirmada".
-    
-    Si no se proporciona, construye un prompt genérico.
+    Construye el prompt de extracción con estructura ESTRICTA.
     
     Args:
         document_text: Texto del documento a procesar
         tipo_titular: "empresa" o "persona" (de clasificación previa)
-        nombre_titular: Nombre del titular identificado (opcional)
-        nombre_representante: Nombre del representante identificado (opcional)
-        include_examples: Si incluir ejemplos en el prompt
+        nombre_titular: Nombre del titular identificado
+        nombre_representante: Nombre del representante identificado
+        include_examples: Si incluir ejemplos
         
     Returns:
         Tupla (system_prompt, user_prompt)
-        
-    Ejemplo:
-        >>> system, user = build_extraction_prompt(
-        ...     document_text=texto,
-        ...     tipo_titular="empresa",
-        ...     nombre_titular="Instituto Nacional del Suelo Sustentable"
-        ... )
     """
     
-    # Si tenemos clasificación previa, usar prompt específico
-    if tipo_titular:
-        return _build_prompt_con_clasificacion(
-            document_text=document_text,
-            tipo_titular=tipo_titular,
-            nombre_titular=nombre_titular,
-            nombre_representante=nombre_representante,
-            include_examples=include_examples
+    if tipo_titular == "empresa":
+        return _build_prompt_empresa(
+            document_text, nombre_titular, nombre_representante, include_examples
         )
-    
-    # Sin clasificación, usar prompt genérico
-    return _build_prompt_generico(document_text, include_examples)
+    elif tipo_titular == "persona":
+        return _build_prompt_persona(
+            document_text, nombre_titular, nombre_representante, include_examples
+        )
+    else:
+        return _build_prompt_generico(document_text, include_examples)
 
 
-def _build_prompt_con_clasificacion(
+def _build_prompt_empresa(
     document_text: str,
-    tipo_titular: str,
     nombre_titular: str = None,
     nombre_representante: str = None,
     include_examples: bool = True
 ) -> Tuple[str, str]:
     """
-    Construye prompt específico con clasificación previa (FASE 2).
+    Prompt ESTRICTO para extracción de EMPRESA/INSTITUCIÓN.
     
-    Este prompt le dice al LLM exactamente quién es quién,
-    para que no tenga que "adivinar" y se enfoque en extraer detalles.
+    IMPORTANTE: Las empresas/instituciones SIEMPRE deben tener representante.
     """
     
-    # Seleccionar system prompt y plantilla según tipo
-    if tipo_titular == "empresa":
-        system_prompt = SYSTEM_PROMPT_EMPRESA
-        plantilla = PLANTILLA_JSON_EMPRESA
-        ejemplos = [EJEMPLO_EMPRESA_SA, EJEMPLO_INSTITUCION_GOBIERNO]
-    else:
-        system_prompt = SYSTEM_PROMPT_PERSONA
-        plantilla = PLANTILLA_JSON_PERSONA
-        ejemplos = [EJEMPLO_PERSONA_FISICA, EJEMPLO_PERSONA_CON_APODERADO]
-    
-    # Construir sección de información confirmada
-    info_confirmada = f"""
-========================================
-📋 INFORMACIÓN YA CONFIRMADA (NO CAMBIAR)
-========================================
+    user_prompt = """
+╔══════════════════════════════════════════════════════════════════╗
+║                    EXTRACCIÓN DE ESCRITURA                       ║
+║                    TIPO: EMPRESA/INSTITUCIÓN                     ║
+╚══════════════════════════════════════════════════════════════════╝
 
-Esta información fue verificada en una fase previa:
+⚠️ INSTRUCCIONES CRÍTICAS - LEE CON ATENCIÓN:
+==============================================
+1. Extrae SOLO los 9 campos que aparecen en la plantilla
+2. NO inventes campos adicionales
+3. NO crees estructuras como "documento", "inmueble", "firmas", "partes"
+4. El "representante" es un OBJETO con 5 campos, NO un campo string separado
+5. EMPRESA = SIEMPRE tiene representante (es obligatorio)
 
-✅ Tipo de titular: {tipo_titular.upper()}"""
-
-    if nombre_titular:
-        info_confirmada += f"""
-✅ Nombre del titular: {nombre_titular}"""
-    
-    if nombre_representante:
-        info_confirmada += f"""
-✅ Representante: {nombre_representante}"""
-    elif tipo_titular == "empresa":
-        info_confirmada += f"""
-⚠️ Representante: Buscar en el documento (OBLIGATORIO para empresa)"""
-    
-    info_confirmada += """
-
-USA ESTA INFORMACIÓN. No la cambies a menos que sea claramente incorrecta.
-========================================
 """
 
-    # Construir user prompt
-    user_prompt = info_confirmada
-    
-    # Agregar plantilla
-    user_prompt += f"""
-========================================
-PLANTILLA JSON A LLENAR ({tipo_titular.upper()}):
-========================================
-
-```json
-{json.dumps(plantilla, indent=2, ensure_ascii=False)}
-```
-"""
-
-    # Agregar ejemplos si se solicitan
-    if include_examples:
+    # Agregar información confirmada si existe
+    if nombre_titular or nombre_representante:
         user_prompt += """
-========================================
-EJEMPLOS DE RESPUESTA CORRECTA:
-========================================
+✅ INFORMACIÓN YA IDENTIFICADA (ÚSALA):
+=======================================
 """
-        for i, ejemplo in enumerate(ejemplos, 1):
-            user_prompt += f"""
-EJEMPLO {i}:
-```json
-{json.dumps(ejemplo, indent=2, ensure_ascii=False)}
-```
+        if nombre_titular:
+            user_prompt += f"• Titular (empresa/institución): {nombre_titular}\n"
+        if nombre_representante:
+            user_prompt += f"• Representante (persona física que firma): {nombre_representante}\n"
+        user_prompt += "\n"
+
+    # Plantilla EXACTA
+    user_prompt += """
+📋 PLANTILLA JSON - USA EXACTAMENTE ESTA ESTRUCTURA:
+====================================================
+
+{
+    "notario": "NOMBRE COMPLETO DEL NOTARIO",
+    "numero_escritura": 1234,
+    "fecha_documento": "día de mes de año",
+    "tipo_titular": "empresa",
+    "titulares": [
+        {
+            "nombre": "RAZÓN SOCIAL DE LA EMPRESA O INSTITUCIÓN",
+            "actua_por": "representación",
+            "representante": {
+                "nombre": "NOMBRE DE LA PERSONA QUE FIRMA",
+                "en_calidad": "apoderado/representante legal/etc",
+                "escritura": "número de escritura del poder o NO SE ENCONTRÓ DATO",
+                "bis": false,
+                "fecha_poder": "fecha del poder o NO SE ENCONTRÓ DATO"
+            }
+        }
+    ],
+    "adquirientes": [
+        {
+            "nombre": "NOMBRE DEL COMPRADOR",
+            "estado_civil": "soltero/casado/etc",
+            "tipo_sociedad": null,
+            "edad": null,
+            "rfc": "RFC123..." o false,
+            "curp": "CURP123..." o false
+        }
+    ],
+    "monto_operacion": "$X,XXX.XX",
+    "tipo_moneda": "MXN",
+    "valor_catastral": "$X,XXX.XX" o null
+}
+
 """
 
-    # Agregar errores comunes
-    user_prompt += _build_errores_comunes()
-    
-    # Agregar documento
+    if include_examples:
+        user_prompt += f"""
+📌 EJEMPLO 1 - INSTITUCIÓN GUBERNAMENTAL:
+=========================================
+
+```json
+{json.dumps(EJEMPLO_JSON_EMPRESA, indent=4, ensure_ascii=False)}
+```
+
+📌 EJEMPLO 2 - SOCIEDAD ANÓNIMA:
+================================
+
+```json
+{json.dumps(EJEMPLO_JSON_EMPRESA_2, indent=4, ensure_ascii=False)}
+```
+
+"""
+
+    user_prompt += """
+❌ ERRORES COMUNES QUE DEBES EVITAR:
+====================================
+
+ERROR 1 - Campo "representante_legal" separado:
+-----------------------------------------------
+❌ INCORRECTO:
+{
+    "titulares": [{
+        "nombre": "Instituto...",
+        "representante": null,
+        "representante_legal": "Ernesto..."
+    }]
+}
+
+✅ CORRECTO:
+{
+    "titulares": [{
+        "nombre": "Instituto...",
+        "representante": {
+            "nombre": "Ernesto...",
+            "en_calidad": "...",
+            "escritura": "...",
+            "bis": false,
+            "fecha_poder": "..."
+        }
+    }]
+}
+
+ERROR 2 - Agregar estructura "documento":
+-----------------------------------------
+❌ INCORRECTO:
+{
+    "notario": "...",
+    "documento": {
+        "inmueble": {...},
+        "firmas": {...}
+    }
+}
+
+✅ CORRECTO:
+{
+    "notario": "...",
+    "numero_escritura": 123,
+    ... (solo 9 campos en raíz)
+}
+
+"""
+
     user_prompt += f"""
-========================================
-DOCUMENTO A ANALIZAR:
-========================================
+📄 DOCUMENTO A ANALIZAR:
+========================
 
 {document_text}
 
-========================================
-TU RESPUESTA (solo JSON válido):
-========================================
+══════════════════════════════════════════════════════════════════
+🎯 RESPONDE SOLO CON EL JSON.
+🚫 NO AGREGUES TEXTO ANTES NI DESPUÉS DEL JSON.
+🚫 NO AGREGUES CAMPOS QUE NO ESTÉN EN LA PLANTILLA.
+══════════════════════════════════════════════════════════════════
 """
 
-    return system_prompt, user_prompt
+    return SYSTEM_PROMPT_ESTRICTO, user_prompt
+
+
+def _build_prompt_persona(
+    document_text: str,
+    nombre_titular: str = None,
+    nombre_representante: str = None,
+    include_examples: bool = True
+) -> Tuple[str, str]:
+    """
+    Prompt ESTRICTO para extracción de PERSONA FÍSICA.
+    
+    IMPORTANTE: Para persona física, el representante es OPCIONAL.
+    - Si actúa por derecho propio → representante: null
+    - Si tiene apoderado → representante: {objeto}
+    """
+    
+    user_prompt = """
+╔══════════════════════════════════════════════════════════════════╗
+║                    EXTRACCIÓN DE ESCRITURA                       ║
+║                    TIPO: PERSONA FÍSICA                          ║
+╚══════════════════════════════════════════════════════════════════╝
+
+⚠️ INSTRUCCIONES CRÍTICAS:
+==========================
+1. Extrae SOLO los 9 campos de la plantilla
+2. NO inventes campos adicionales
+3. Para PERSONA FÍSICA, "representante" puede ser:
+   - null (si actúa por derecho propio)
+   - un objeto (si tiene apoderado)
+4. NO crees estructuras como "documento", "inmueble", "firmas"
+
+"""
+
+    if nombre_titular:
+        user_prompt += f"""
+✅ INFORMACIÓN YA IDENTIFICADA:
+===============================
+• Titular (persona física): {nombre_titular}
+"""
+        if nombre_representante:
+            user_prompt += f"• Representante/Apoderado: {nombre_representante}\n"
+        user_prompt += "\n"
+
+    user_prompt += """
+📋 PLANTILLA - PERSONA SIN APODERADO (actúa por derecho propio):
+================================================================
+
+{
+    "notario": "NOMBRE DEL NOTARIO",
+    "numero_escritura": 1234,
+    "fecha_documento": "día de mes de año",
+    "tipo_titular": "persona",
+    "titulares": [
+        {
+            "nombre": "NOMBRE DE LA PERSONA",
+            "actua_por": "derecho propio",
+            "representante": null
+        }
+    ],
+    "adquirientes": [
+        {
+            "nombre": "NOMBRE DEL COMPRADOR",
+            "estado_civil": "soltero/casado/etc",
+            "tipo_sociedad": null,
+            "edad": null,
+            "rfc": false,
+            "curp": false
+        }
+    ],
+    "monto_operacion": "$X,XXX.XX",
+    "tipo_moneda": "MXN",
+    "valor_catastral": null
+}
+
+📋 PLANTILLA - PERSONA CON APODERADO:
+=====================================
+
+{
+    "notario": "NOMBRE DEL NOTARIO",
+    "numero_escritura": 1234,
+    "fecha_documento": "día de mes de año",
+    "tipo_titular": "persona",
+    "titulares": [
+        {
+            "nombre": "NOMBRE DE LA PERSONA",
+            "actua_por": "representación",
+            "representante": {
+                "nombre": "NOMBRE DEL APODERADO",
+                "en_calidad": "apoderado",
+                "escritura": "número",
+                "bis": false,
+                "fecha_poder": "fecha"
+            }
+        }
+    ],
+    "adquirientes": [...],
+    "monto_operacion": "$X,XXX.XX",
+    "tipo_moneda": "MXN",
+    "valor_catastral": null
+}
+
+"""
+
+    if include_examples:
+        user_prompt += f"""
+📌 EJEMPLO - PERSONA SIN APODERADO:
+===================================
+
+```json
+{json.dumps(EJEMPLO_JSON_PERSONA, indent=4, ensure_ascii=False)}
+```
+
+"""
+
+    user_prompt += f"""
+📄 DOCUMENTO A ANALIZAR:
+========================
+
+{document_text}
+
+══════════════════════════════════════════════════════════════════
+🎯 RESPONDE SOLO CON EL JSON.
+🚫 NO AGREGUES CAMPOS QUE NO ESTÉN EN LA PLANTILLA.
+══════════════════════════════════════════════════════════════════
+"""
+
+    return SYSTEM_PROMPT_ESTRICTO, user_prompt
 
 
 def _build_prompt_generico(
@@ -552,73 +511,72 @@ def _build_prompt_generico(
     include_examples: bool = True
 ) -> Tuple[str, str]:
     """
-    Construye prompt genérico sin clasificación previa.
-    
-    Se usa como fallback si la clasificación no está disponible.
+    Prompt genérico cuando no hay clasificación previa.
     """
     
-    user_prompt = f"""
-========================================
-INSTRUCCIONES DE EXTRACCIÓN
-========================================
+    user_prompt = """
+╔══════════════════════════════════════════════════════════════════╗
+║                    EXTRACCIÓN DE ESCRITURA                       ║
+╚══════════════════════════════════════════════════════════════════╝
 
-Analiza el siguiente documento notarial y extrae la información en formato JSON.
+INSTRUCCIONES:
+==============
+1. Determina si el titular es EMPRESA o PERSONA
+2. Extrae SOLO los 9 campos de la plantilla
+3. NO agregues campos adicionales
 
-PASO 1 - Determina el tipo de titular:
-- Si el vendedor es S.A., S.A. de C.V., Instituto, Secretaría, INFONAVIT, etc. → tipo_titular="empresa"
-- Si el vendedor es una persona física actuando por sí misma → tipo_titular="persona"
+PLANTILLA JSON (9 campos obligatorios):
+=======================================
 
-PASO 2 - Identifica titular y representante:
-- TITULAR: La entidad que vende (empresa/institución O persona física)
-- REPRESENTANTE: La persona física que firma (si existe)
+{
+    "notario": "NOMBRE",
+    "numero_escritura": 1234,
+    "fecha_documento": "fecha",
+    "tipo_titular": "empresa" o "persona",
+    "titulares": [
+        {
+            "nombre": "NOMBRE",
+            "actua_por": "representación" o "derecho propio",
+            "representante": null o {nombre, en_calidad, escritura, bis, fecha_poder}
+        }
+    ],
+    "adquirientes": [
+        {
+            "nombre": "NOMBRE",
+            "estado_civil": "estado",
+            "tipo_sociedad": null,
+            "edad": null,
+            "rfc": false,
+            "curp": false
+        }
+    ],
+    "monto_operacion": "$X,XXX.XX",
+    "tipo_moneda": "MXN",
+    "valor_catastral": null
+}
 
-========================================
-PLANTILLA JSON:
-========================================
+REGLAS:
+- Si es EMPRESA → representante es OBLIGATORIO (objeto)
+- Si es PERSONA → representante es OPCIONAL (null o objeto)
 
-```json
-{json.dumps(PLANTILLA_JSON_EMPRESA, indent=2, ensure_ascii=False)}
-```
 """
 
-    if include_examples:
-        user_prompt += f"""
-========================================
-EJEMPLO - EMPRESA/INSTITUCIÓN:
-========================================
-
-```json
-{json.dumps(EJEMPLO_INSTITUCION_GOBIERNO, indent=2, ensure_ascii=False)}
-```
-
-========================================
-EJEMPLO - PERSONA FÍSICA:
-========================================
-
-```json
-{json.dumps(EJEMPLO_PERSONA_FISICA, indent=2, ensure_ascii=False)}
-```
-"""
-
-    user_prompt += _build_errores_comunes()
-    
     user_prompt += f"""
-========================================
-DOCUMENTO A ANALIZAR:
-========================================
+DOCUMENTO:
+==========
 
 {document_text}
 
-========================================
-TU RESPUESTA (solo JSON válido):
-========================================
+══════════════════════════════════════════════════════════════════
+RESPONDE SOLO CON EL JSON. NO AGREGUES CAMPOS EXTRA.
+══════════════════════════════════════════════════════════════════
 """
 
-    return SYSTEM_PROMPT_EXTRACCION, user_prompt
+    return SYSTEM_PROMPT_ESTRICTO, user_prompt
 
 
 # =============================================================================
-# PROMPT DE VALIDACIÓN (PARA RETRY)
+# PROMPT DE VALIDACIÓN/RETRY
 # =============================================================================
 
 def build_validation_prompt(
@@ -627,176 +585,286 @@ def build_validation_prompt(
     document_text: str,
     tipo_titular: str = None,
     nombre_titular: str = None,
-    nombre_representante: str = None
+    nombre_representante: str = None,
+    datos_regex: Dict = None
 ) -> Tuple[str, str]:
     """
-    Construye prompt para corregir una extracción fallida (retry).
+    Prompt para corregir una extracción fallida.
     
-    Este prompt:
-    1. Muestra el JSON anterior con sus errores
-    2. Explica qué campos faltan o son incorrectos
-    3. Mantiene la clasificación de la Fase 1
-    4. Pide al LLM que corrija
-    
-    Args:
-        json_anterior: JSON del intento anterior
-        error_validacion: Error de Pydantic o mensaje de error
-        document_text: Texto del documento (truncado para el prompt)
-        tipo_titular: Tipo clasificado (mantener consistente)
-        nombre_titular: Nombre del titular (de clasificación)
-        nombre_representante: Nombre del representante (de clasificación)
-        
-    Returns:
-        Tupla (system_prompt, user_prompt)
+    Mantiene el tipo_titular clasificado y proporciona
+    feedback específico de los errores.
     """
     
-    # System prompt de corrección
-    if tipo_titular == "empresa":
-        system_prompt = """Eres un corrector de datos JSON para escrituras de EMPRESAS/INSTITUCIONES.
-
-REGLAS:
-1. tipo_titular SIEMPRE es "empresa" (NO lo cambies)
-2. El TITULAR es la empresa/institución, el REPRESENTANTE es quien firma
-3. El representante es OBLIGATORIO y debe ser una PERSONA FÍSICA
-4. numero_escritura es INTEGER (sin comillas)
-
-Corrige los errores y devuelve el JSON completo."""
-    else:
-        system_prompt = """Eres un corrector de datos JSON para escrituras de PERSONAS FÍSICAS.
-
-REGLAS:
-1. tipo_titular SIEMPRE es "persona" (NO lo cambies)
-2. El representante es OPCIONAL (null si actúa por derecho propio)
-3. numero_escritura es INTEGER (sin comillas)
-
-Corrige los errores y devuelve el JSON completo."""
-
-    # Analizar errores del JSON anterior
-    analisis = _analizar_errores_json(json_anterior, error_validacion, tipo_titular)
+    # Limpiar el JSON anterior de campos extra
+    json_limpio = limpiar_json_extra(json_anterior) if json_anterior else {}
     
-    # Construir user prompt
+    system_prompt = """Eres un corrector de JSON para escrituras públicas.
+
+REGLAS ESTRICTAS:
+1. Corrige los errores señalados
+2. NO agregues campos nuevos
+3. Usa SOLO los 9 campos de la plantilla
+4. El "representante" debe ser un OBJETO con 5 campos, NO un string separado
+5. NO crees estructuras como "documento", "inmueble", "firmas\""""
+
     user_prompt = f"""
-========================================
-⚠️ CORRECCIÓN REQUERIDA
-========================================
+⚠️ TU JSON ANTERIOR TIENE ERRORES. CORRÍGELOS.
 
-Tu respuesta anterior tuvo errores. Corrígelos.
+TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPECIFICADO'}
+(NO cambies el tipo_titular)
 
-{analisis}
+"""
 
-========================================
-📋 INFORMACIÓN CONFIRMADA (NO CAMBIAR):
-========================================
-- Tipo de titular: {tipo_titular or 'No especificado'}"""
+    # Analizar errores específicos
+    if json_anterior:
+        errores = _detectar_errores_estructura(json_anterior)
+        if errores:
+            user_prompt += "❌ ERRORES DETECTADOS:\n"
+            user_prompt += "=" * 40 + "\n"
+            for error in errores:
+                user_prompt += f"• {error}\n"
+            user_prompt += "\n"
     
-    if nombre_titular:
-        user_prompt += f"""
-- Nombre del titular: {nombre_titular}"""
-    
-    if nombre_representante:
-        user_prompt += f"""
-- Representante: {nombre_representante}"""
+    if error_validacion:
+        user_prompt += f"Error de validación Pydantic:\n{error_validacion[:300]}\n\n"
 
     user_prompt += f"""
+📋 ESTRUCTURA CORRECTA QUE DEBES USAR:
+======================================
 
-========================================
-TU JSON ANTERIOR (con errores):
-========================================
+{{
+    "notario": "...",
+    "numero_escritura": 1234,
+    "fecha_documento": "...",
+    "tipo_titular": "{tipo_titular or 'empresa'}",
+    "titulares": [
+        {{
+            "nombre": "...",
+            "actua_por": "...",
+            "representante": {{
+                "nombre": "...",
+                "en_calidad": "...",
+                "escritura": "...",
+                "bis": false,
+                "fecha_poder": "..."
+            }}
+        }}
+    ],
+    "adquirientes": [
+        {{
+            "nombre": "...",
+            "estado_civil": "...",
+            "tipo_sociedad": null,
+            "edad": null,
+            "rfc": false,
+            "curp": false
+        }}
+    ],
+    "monto_operacion": "...",
+    "tipo_moneda": "MXN",
+    "valor_catastral": null
+}}
+
+"""
+
+    if json_limpio:
+        user_prompt += f"""
+📄 TU JSON ANTERIOR (parcialmente limpiado):
+============================================
 
 ```json
-{json.dumps(json_anterior, indent=2, ensure_ascii=False) if json_anterior else "No se pudo parsear JSON"}
+{json.dumps(json_limpio, indent=2, ensure_ascii=False)}
 ```
 
-========================================
-DOCUMENTO ORIGINAL (fragmento):
-========================================
+"""
 
-{document_text[:2000]}
+    user_prompt += f"""
+📄 FRAGMENTO DEL DOCUMENTO ORIGINAL:
+====================================
 
-========================================
-TU JSON CORREGIDO:
-========================================
+{document_text[:1500]}
+
+══════════════════════════════════════════════════════════════════
+🎯 DEVUELVE EL JSON CORREGIDO.
+🚫 NO AGREGUES CAMPOS QUE NO ESTÉN EN LA PLANTILLA.
+══════════════════════════════════════════════════════════════════
 """
 
     return system_prompt, user_prompt
 
 
-def _analizar_errores_json(
-    json_anterior: Dict,
-    error_validacion: str,
-    tipo_titular: str = None
-) -> str:
+def _detectar_errores_estructura(json_data: Dict) -> List[str]:
     """
-    Analiza los errores del JSON anterior y genera feedback.
+    Detecta errores específicos en la estructura del JSON.
     """
-    
-    if not json_anterior:
-        return "❌ No se pudo parsear el JSON. Asegúrate de devolver JSON válido."
-    
     errores = []
     
-    # Campos requeridos
-    campos_requeridos = [
-        "notario", "numero_escritura", "fecha_documento",
-        "tipo_titular", "titulares", "adquirientes",
-        "monto_operacion", "tipo_moneda"
-    ]
+    # Detectar campos extra en raíz
+    campos_extra_raiz = set(json_data.keys()) - CAMPOS_RAIZ_PERMITIDOS
+    if campos_extra_raiz:
+        errores.append(f"Campos NO permitidos en raíz: {', '.join(campos_extra_raiz)}")
     
-    # Verificar campos faltantes
-    for campo in campos_requeridos:
-        if campo not in json_anterior or json_anterior[campo] is None:
-            errores.append(f"❌ Campo faltante: {campo}")
-        elif campo == "titulares" and len(json_anterior.get("titulares", [])) == 0:
-            errores.append(f"❌ Campo vacío: titulares (debe tener al menos 1)")
-        elif campo == "adquirientes" and len(json_anterior.get("adquirientes", [])) == 0:
-            errores.append(f"❌ Campo vacío: adquirientes (debe tener al menos 1)")
-    
-    # Verificar tipo_titular
-    tipo_json = json_anterior.get("tipo_titular", "")
-    if tipo_titular and tipo_json != tipo_titular:
-        errores.append(f"❌ tipo_titular incorrecto: dijiste '{tipo_json}', debe ser '{tipo_titular}'")
-    
-    # Verificar numero_escritura es int
-    num_esc = json_anterior.get("numero_escritura")
-    if isinstance(num_esc, str):
-        errores.append(f"❌ numero_escritura es string ('{num_esc}'), debe ser integer (sin comillas)")
-    
-    # Verificar estructura de titulares
-    for i, titular in enumerate(json_anterior.get("titulares", [])):
+    # Detectar problemas en titulares
+    for i, titular in enumerate(json_data.get("titulares", [])):
         if isinstance(titular, dict):
-            # Verificar campo "nombre"
-            if "nombre" not in titular:
-                if "nombre_titular" in titular:
-                    errores.append(f"❌ titulares[{i}]: usa 'nombre_titular', debe ser 'nombre'")
-                elif "razon_social" in titular:
-                    errores.append(f"❌ titulares[{i}]: usa 'razon_social', debe ser 'nombre'")
+            campos_extra = set(titular.keys()) - CAMPOS_TITULAR_PERMITIDOS
+            if campos_extra:
+                errores.append(f"titulares[{i}] tiene campos extra: {', '.join(campos_extra)}")
+            
+            if "representante_legal" in titular:
+                errores.append(f"titulares[{i}]: 'representante_legal' debe ir DENTRO de 'representante'")
+            
+            if titular.get("representante") is None and "representante_legal" in titular:
+                errores.append(f"titulares[{i}]: Mueve 'representante_legal' dentro del objeto 'representante'")
+    
+    # Detectar problemas en adquirientes
+    for i, adq in enumerate(json_data.get("adquirientes", [])):
+        if isinstance(adq, dict):
+            campos_extra = set(adq.keys()) - CAMPOS_ADQUIRIENTE_PERMITIDOS
+            if campos_extra:
+                errores.append(f"adquirientes[{i}] tiene campos extra: {', '.join(campos_extra)}")
+    
+    # Detectar "documento" como campo
+    if "documento" in json_data:
+        errores.append("Campo 'documento' NO está permitido - extrae los datos directamente en los 9 campos")
+    
+    return errores
+
+
+# =============================================================================
+# LIMPIEZA DE JSON (POST-PROCESAMIENTO)
+# =============================================================================
+
+def limpiar_json_extra(json_data: Dict) -> Dict:
+    """
+    Elimina campos no permitidos del JSON.
+    
+    Esta función es la ÚLTIMA LÍNEA DE DEFENSA para asegurar
+    que el JSON tenga exactamente la estructura esperada.
+    
+    PROCESO:
+    ========
+    1. Filtra solo campos permitidos en raíz
+    2. Limpia cada titular (solo 3 campos)
+    3. Convierte representante_legal → representante objeto
+    4. Limpia cada adquiriente (solo 6 campos)
+    5. Recupera datos de "documento" si existe
+    
+    Args:
+        json_data: JSON potencialmente con campos extra
+        
+    Returns:
+        JSON limpio con solo campos permitidos
+    """
+    
+    if not json_data:
+        return {}
+    
+    resultado = {}
+    
+    # 1. Copiar solo campos permitidos de la raíz
+    for campo in CAMPOS_RAIZ_PERMITIDOS:
+        if campo in json_data:
+            resultado[campo] = json_data[campo]
+    
+    # 2. Limpiar titulares
+    if "titulares" in resultado and isinstance(resultado["titulares"], list):
+        titulares_limpios = []
+        for titular in resultado["titulares"]:
+            if isinstance(titular, dict):
+                titular_limpio = {}
+                
+                # Copiar solo campos permitidos
+                for campo in CAMPOS_TITULAR_PERMITIDOS:
+                    if campo in titular:
+                        titular_limpio[campo] = titular[campo]
+                
+                # Caso especial: representante_legal como campo separado
+                if titular_limpio.get("representante") is None:
+                    # Buscar representante_legal
+                    rep_legal = titular.get("representante_legal")
+                    if rep_legal:
+                        titular_limpio["representante"] = {
+                            "nombre": rep_legal if isinstance(rep_legal, str) else str(rep_legal),
+                            "en_calidad": titular.get("en_calidad", NO_ENCONTRADO),
+                            "escritura": titular.get("escritura", NO_ENCONTRADO),
+                            "bis": titular.get("bis", False),
+                            "fecha_poder": titular.get("fecha_poder", NO_ENCONTRADO)
+                        }
+                
+                # Limpiar objeto representante si existe
+                if isinstance(titular_limpio.get("representante"), dict):
+                    rep = titular_limpio["representante"]
+                    rep_limpio = {}
+                    for campo in CAMPOS_REPRESENTANTE_PERMITIDOS:
+                        if campo in rep:
+                            rep_limpio[campo] = rep[campo]
+                        else:
+                            # Valores por defecto
+                            if campo == "bis":
+                                rep_limpio[campo] = False
+                            else:
+                                rep_limpio[campo] = NO_ENCONTRADO
+                    titular_limpio["representante"] = rep_limpio
+                
+                # Asegurar campos mínimos
+                if "nombre" not in titular_limpio:
+                    titular_limpio["nombre"] = NO_ENCONTRADO
+                if "actua_por" not in titular_limpio:
+                    titular_limpio["actua_por"] = NO_ENCONTRADO
+                if "representante" not in titular_limpio:
+                    titular_limpio["representante"] = None
+                
+                titulares_limpios.append(titular_limpio)
+        
+        resultado["titulares"] = titulares_limpios
+    
+    # 3. Limpiar adquirientes
+    if "adquirientes" in resultado and isinstance(resultado["adquirientes"], list):
+        adquirientes_limpios = []
+        for adq in resultado["adquirientes"]:
+            if isinstance(adq, dict):
+                adq_limpio = {}
+                for campo in CAMPOS_ADQUIRIENTE_PERMITIDOS:
+                    if campo in adq:
+                        adq_limpio[campo] = adq[campo]
+                    else:
+                        # Valores por defecto
+                        if campo in ["rfc", "curp"]:
+                            adq_limpio[campo] = False
+                        else:
+                            adq_limpio[campo] = None
+                adquirientes_limpios.append(adq_limpio)
+        resultado["adquirientes"] = adquirientes_limpios
+    
+    # 4. Recuperar datos del campo "documento" si existe
+    if "documento" in json_data and isinstance(json_data["documento"], dict):
+        doc = json_data["documento"]
+        
+        # Recuperar fecha
+        if not resultado.get("fecha_documento") or resultado.get("fecha_documento") == NO_ENCONTRADO:
+            if "fecha_documento" in doc:
+                resultado["fecha_documento"] = doc["fecha_documento"]
+            elif "fecha" in doc:
+                resultado["fecha_documento"] = doc["fecha"]
+        
+        # Recuperar monto
+        if not resultado.get("monto_operacion") or resultado.get("monto_operacion") == NO_ENCONTRADO:
+            if "monto_operacion" in doc:
+                monto = doc["monto_operacion"]
+                if isinstance(monto, (int, float)):
+                    resultado["monto_operacion"] = f"${monto:,.2f}"
                 else:
-                    errores.append(f"❌ titulares[{i}]: falta campo 'nombre'")
-            
-            # Verificar tipo_titular dentro de titular (error común)
-            if "tipo_titular" in titular:
-                errores.append(f"❌ titulares[{i}]: tiene 'tipo_titular' adentro, debe ir en la RAÍZ")
-            
-            # Para empresa, verificar representante
-            if tipo_titular == "empresa":
-                rep = titular.get("representante")
-                if rep is None:
-                    errores.append(f"❌ titulares[{i}]: empresa debe tener representante")
-                elif isinstance(rep, str):
-                    errores.append(f"❌ titulares[{i}]: representante es string, debe ser objeto")
+                    resultado["monto_operacion"] = str(monto)
+        
+        # Recuperar notario
+        if not resultado.get("notario") or resultado.get("notario") == NO_ENCONTRADO:
+            if "notario" in doc and isinstance(doc["notario"], dict):
+                resultado["notario"] = doc["notario"].get("nombre", NO_ENCONTRADO)
+            elif "notario" in doc and isinstance(doc["notario"], str):
+                resultado["notario"] = doc["notario"]
     
-    # Parsear errores de Pydantic
-    if error_validacion and "Field required" in error_validacion:
-        import re
-        matches = re.findall(r"'(\w+)'[^']*Field required", error_validacion)
-        for campo in matches:
-            if f"Campo faltante: {campo}" not in str(errores):
-                errores.append(f"❌ Campo requerido por validación: {campo}")
-    
-    if not errores:
-        errores.append("⚠️ Error de validación no específico. Revisa el formato general.")
-    
-    return "\n".join(errores)
+    return resultado
 
 
 # =============================================================================
@@ -807,15 +875,7 @@ def estimate_tokens(text: str, chars_per_token: float = 4.0) -> int:
     """
     Estima el número de tokens en un texto.
     
-    Los LLMs tienen límite de contexto en tokens, no caracteres.
-    Esta es una estimación aproximada (4 caracteres ≈ 1 token para español).
-    
-    Args:
-        text: Texto a estimar
-        chars_per_token: Caracteres por token (default 4 para español)
-        
-    Returns:
-        Número estimado de tokens
+    La estimación es aproximada: ~4 caracteres por token en español.
     """
     return int(len(text) / chars_per_token)
 
@@ -826,58 +886,50 @@ def estimate_tokens(text: str, chars_per_token: float = 4.0) -> int:
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("PRUEBA DEL CONSTRUCTOR DE PROMPTS")
+    print("PRUEBA DEL CONSTRUCTOR DE PROMPTS (ESTRICTO)")
     print("=" * 60)
     
-    documento_prueba = """
-    ESCRITURA NÚMERO 2397
-    Ante mí, Licenciado Rigoberto Ochoa Torres, Notario Público,
-    comparece el señor Ernesto Padilla Aceves en representación
-    del Instituto Nacional del Suelo Sustentable (INSS)...
-    """
+    # Prueba de limpieza de JSON
+    print("\n📋 Prueba de limpieza de JSON con campos extra:")
     
-    # Prueba 1: Prompt con clasificación (empresa)
-    print("\n📋 Prueba 1: Prompt con clasificación EMPRESA")
-    print("-" * 40)
+    json_malo = {
+        "notario": "NO SE ENCONTRÓ DATO",
+        "numero_escritura": 2307,
+        "tipo_titular": "empresa",
+        "titulares": [
+            {
+                "nombre": "Instituto Nacional...",
+                "actua_por": "NO SE ENCONTRÓ DATO",
+                "representante": None,
+                "representante_legal": "Ernesto Padilla Aceves"
+            }
+        ],
+        "adquirientes": [
+            {
+                "nombre": "Angelita Pérez Soto",
+                "estado_civil": "NO SE ENCONTRÓ DATO",
+                "gestora_negocios": "María..."
+            }
+        ],
+        "documento": {
+            "fecha_documento": "05 mayo 2023",
+            "monto_operacion": 8654
+        }
+    }
     
-    system, user = build_extraction_prompt(
-        document_text=documento_prueba,
-        tipo_titular="empresa",
-        nombre_titular="Instituto Nacional del Suelo Sustentable",
-        nombre_representante="Ernesto Padilla Aceves"
-    )
+    print("\n❌ JSON original (con errores):")
+    print(json.dumps(json_malo, indent=2, ensure_ascii=False)[:600])
     
-    print(f"   System prompt: {len(system)} caracteres")
-    print(f"   User prompt: {len(user)} caracteres")
-    print(f"   Tokens estimados: ~{estimate_tokens(system + user)}")
+    json_limpio = limpiar_json_extra(json_malo)
     
-    # Prueba 2: Prompt con clasificación (persona)
-    print("\n📋 Prueba 2: Prompt con clasificación PERSONA")
-    print("-" * 40)
+    print("\n✅ JSON limpio:")
+    print(json.dumps(json_limpio, indent=2, ensure_ascii=False))
     
-    system, user = build_extraction_prompt(
-        document_text=documento_prueba,
-        tipo_titular="persona",
-        nombre_titular="Juan Pérez López"
-    )
+    # Verificaciones
+    assert "documento" not in json_limpio, "documento no debería existir"
+    assert "representante_legal" not in json_limpio["titulares"][0], "representante_legal no debería existir"
+    assert json_limpio["titulares"][0]["representante"] is not None, "representante debería ser objeto"
+    assert json_limpio["titulares"][0]["representante"]["nombre"] == "Ernesto Padilla Aceves"
+    assert "gestora_negocios" not in json_limpio["adquirientes"][0]
     
-    print(f"   System prompt: {len(system)} caracteres")
-    print(f"   User prompt: {len(user)} caracteres")
-    print(f"   Tokens estimados: ~{estimate_tokens(system + user)}")
-    
-    # Prueba 3: Prompt genérico (sin clasificación)
-    print("\n📋 Prueba 3: Prompt genérico (sin clasificación)")
-    print("-" * 40)
-    
-    system, user = build_extraction_prompt(
-        document_text=documento_prueba,
-        tipo_titular=None
-    )
-    
-    print(f"   System prompt: {len(system)} caracteres")
-    print(f"   User prompt: {len(user)} caracteres")
-    print(f"   Tokens estimados: ~{estimate_tokens(system + user)}")
-    
-    print("\n" + "=" * 60)
-    print("✅ PRUEBAS COMPLETADAS")
-    print("=" * 60)
+    print("\n✅ Todas las verificaciones pasaron")

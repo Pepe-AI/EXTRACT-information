@@ -76,6 +76,7 @@ from utils.prompt_builder import (
     build_extraction_prompt,
     build_validation_prompt,
     estimate_tokens,
+    limpiar_json_extra,  # NUEVO: Limpia campos extra del JSON
 )
 from utils.clasificador import (
     clasificar_documento,
@@ -458,6 +459,17 @@ class EscrituraExtractor:
                     print(f"      ⚠️ No se extrajo JSON de la respuesta")
                     last_error = "No se pudo parsear JSON de la respuesta"
                     continue
+                
+                # ============================================================
+                # LIMPIEZA DE CAMPOS EXTRA (CRÍTICO)
+                # ============================================================
+                # El LLM a veces agrega campos no solicitados como:
+                # - "documento", "inmueble", "firmas"
+                # - "representante_legal" (debe estar dentro de representante)
+                # Esta función los elimina y corrige la estructura.
+                # ============================================================
+                print(f"      🧹 Limpiando campos extra del JSON...")
+                json_data = limpiar_json_extra(json_data)
                 
                 # Guardar para siguiente intento
                 last_json = json_data
