@@ -11,7 +11,13 @@ from .ollama_service import (
 from .azure_ocr_service import (
     AzureConfig,
     AzureOCRService,
-    get_ocr_service
+    get_ocr_service,
+    OCRServiceError,
+    OCRConfigurationError,
+    OCRConnectionError,
+    OCRAuthenticationError,
+    OCRQuotaExceededError,
+    OCRProcessingError
 )
 
 __all__ = [
@@ -20,5 +26,11 @@ __all__ = [
     'get_ollama_service',
     'AzureConfig',
     'AzureOCRService',
-    'get_ocr_service'
+    'get_ocr_service',
+    'OCRServiceError',
+    'OCRConfigurationError',
+    'OCRConnectionError',
+    'OCRAuthenticationError',
+    'OCRQuotaExceededError',
+    'OCRProcessingError'
 ]

@@ -5,12 +5,6 @@ DOS MODOS DE VALIDACIÓN:
 ========================
 1. ESTRICTO (EscrituraPublica): Todos los campos obligatorios
 2. FLEXIBLE (EscrituraPublicaFlexible): Acepta datos parciales
-
-¿Por qué dos modos?
-===================
-- Intentamos primero validación ESTRICTA (ideal)
-- Si falla, usamos FLEXIBLE para no perder los datos extraídos
-- La validación flexible reporta qué campos se encontraron y cuáles no
 """
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -38,14 +32,60 @@ class TipoTitular(str, Enum):
 # MODELOS FLEXIBLES (Todo opcional)
 # =============================================================================
 
-class RepresentanteFlexible(BaseModel):
+class NotarioFlexible(BaseModel):
     """
-    Representante con todos los campos opcionales.
+    Modelo FLEXIBLE para datos del notario.
     
-    NOTA: El campo 'escritura' acepta tanto str como int porque
-    DeepSeek a veces devuelve el número como entero.
-    Se convierte automáticamente a string.
+    ESTRUCTURA:
+    ===========
+    - nombre: Nombre completo del notario
+    - numero_notario: Número de notaría (2-3 dígitos, ej: "45", "123")
+    - municipio: Municipio donde ejerce
+    - escritura: Número de escritura (4-7 dígitos, ej: "2307", "1234567")
+    - fecha_documento: Fecha del documento notarial
+    
+    NOTA: Este modelo se usa dentro de un array, pero solo puede
+    existir UN notario por documento.
     """
+    
+    nombre: Optional[str] = Field(default=NO_ENCONTRADO, description="Nombre del notario")
+    numero_notario: Optional[Union[str, int]] = Field(
+        default=NO_ENCONTRADO, 
+        description="Número de notaría (2-3 dígitos)"
+    )
+    municipio: Optional[str] = Field(default=NO_ENCONTRADO, description="Municipio de la notaría")
+    escritura: Optional[Union[str, int]] = Field(
+        default=NO_ENCONTRADO, 
+        description="Número de escritura (4-7 dígitos)"
+    )
+    fecha_documento: Optional[str] = Field(default=NO_ENCONTRADO, description="Fecha del documento")
+    
+    model_config = {"extra": "allow"}
+    
+    @field_validator('numero_notario', 'escritura', mode='before')
+    @classmethod
+    def convertir_numero_a_string(cls, v):
+        """
+        Convierte números a string para consistencia.
+        
+        ¿Por qué?
+        =========
+        El LLM puede devolver estos campos como int o string.
+        Los normalizamos siempre a string para evitar inconsistencias.
+        
+        Ejemplo:
+            2307 → "2307"
+            "45" → "45"
+        """
+        if v is None:
+            return NO_ENCONTRADO
+        if isinstance(v, int):
+            return str(v)
+        return v
+
+
+class RepresentanteFlexible(BaseModel):
+    """Representante con todos los campos opcionales."""
     
     nombre: Optional[str] = Field(default=NO_ENCONTRADO)
     en_calidad: Optional[str] = Field(default=NO_ENCONTRADO)
@@ -58,22 +98,10 @@ class RepresentanteFlexible(BaseModel):
     @field_validator('escritura', mode='before')
     @classmethod
     def convertir_escritura_a_string(cls, v):
-        """
-        Convierte el número de escritura a string si viene como int.
-        
-        ¿Por qué es necesario?
-        ======================
-        DeepSeek a veces devuelve:
-            "escritura": 13425      ← int (causa error sin este validador)
-        En lugar de:
-            "escritura": "13425"    ← str (correcto)
-        
-        Este validador acepta ambos y los normaliza a string.
-        """
         if v is None:
             return NO_ENCONTRADO
         if isinstance(v, int):
-            return str(v)  # Convertir 13425 → "13425"
+            return str(v)
         return v
 
 
@@ -104,13 +132,27 @@ class EscrituraPublicaFlexible(BaseModel):
     """
     Modelo FLEXIBLE - Acepta cualquier dato que venga.
     
-    Todos los campos son opcionales.
-    Si no se encuentra un campo, usa valor por defecto.
+    CAMBIO IMPORTANTE EN notario:
+    =============================
+    Antes: notario era un string simple
+    Ahora: notario es un array con UN objeto que contiene:
+        - nombre: Nombre del notario
+        - numero_notario: Número de notaría (2-3 dígitos)
+        - municipio: Municipio de la notaría
+        - escritura: Número de escritura (4-7 dígitos)
+        - fecha_documento: Fecha del documento
+    
+    NOTA: Aunque es array, solo puede existir UN notario.
     """
     
-    notario: Optional[str] = Field(default=NO_ENCONTRADO)
+    # notario ahora es una LISTA con un solo elemento
+    notario: Optional[List[NotarioFlexible]] = Field(default_factory=list)
+    
+    # Estos campos se mantienen para compatibilidad, pero los datos
+    # principales ahora están en notario[0].escritura y notario[0].fecha_documento
     numero_escritura: Optional[int] = Field(default=None)
     fecha_documento: Optional[str] = Field(default=NO_ENCONTRADO)
+    
     tipo_titular: Optional[str] = Field(default=NO_ENCONTRADO)
     titulares: Optional[List[TitularFlexible]] = Field(default_factory=list)
     adquirientes: Optional[List[AdquirienteFlexible]] = Field(default_factory=list)
@@ -120,12 +162,59 @@ class EscrituraPublicaFlexible(BaseModel):
     
     model_config = {"extra": "allow"}
     
+    @field_validator('monto_operacion', mode='before')
+    @classmethod
+    def convertir_monto_a_string(cls, v):
+        """
+        Convierte monto_operacion a string si viene como número.
+        
+        ¿Por qué es necesario?
+        ======================
+        El LLM a veces devuelve:
+            "monto_operacion": 0.0       ← float (causa error sin este validador)
+            "monto_operacion": 1500000   ← int
+        En lugar de:
+            "monto_operacion": "$1,500,000.00"  ← str (correcto)
+        
+        Este validador acepta ambos y los normaliza a string.
+        """
+        if v is None:
+            return NO_ENCONTRADO
+        if isinstance(v, (int, float)):
+            # Si es 0 o 0.0, probablemente no se encontró el dato
+            if v == 0:
+                return NO_ENCONTRADO
+            # Formatear como moneda mexicana
+            return f"${v:,.2f}"
+        return v
+    
+    @field_validator('valor_catastral', mode='before')
+    @classmethod
+    def convertir_catastral_a_string(cls, v):
+        """Convierte valor_catastral a string si viene como número."""
+        if v is None:
+            return None
+        if isinstance(v, (int, float)):
+            if v == 0:
+                return None
+            return f"${v:,.2f}"
+        return v
+    
     def get_campos_encontrados(self) -> Dict[str, Any]:
-        """Devuelve solo los campos que SÍ se encontraron."""
+        """
+        Devuelve solo los campos que SÍ se encontraron.
+        
+        NOTA: Para notario, verificamos si existe el array y tiene datos válidos.
+        """
         encontrados = {}
         
-        if self.notario and self.notario != NO_ENCONTRADO:
-            encontrados["notario"] = self.notario
+        # Verificar notario (nueva estructura como array)
+        if self.notario and len(self.notario) > 0:
+            notario_obj = self.notario[0]
+            # Verificar si tiene al menos el nombre
+            if notario_obj.nombre and notario_obj.nombre != NO_ENCONTRADO:
+                encontrados["notario"] = [n.model_dump() for n in self.notario]
+        
         if self.numero_escritura is not None:
             encontrados["numero_escritura"] = self.numero_escritura
         if self.fecha_documento and self.fecha_documento != NO_ENCONTRADO:
@@ -146,10 +235,21 @@ class EscrituraPublicaFlexible(BaseModel):
         return encontrados
     
     def get_campos_no_encontrados(self) -> List[str]:
-        """Devuelve lista de campos que NO se encontraron."""
+        """
+        Devuelve lista de campos que NO se encontraron.
+        
+        NOTA: Para notario, verificamos si el array tiene datos válidos.
+        """
         no_encontrados = []
         
-        if not self.notario or self.notario == NO_ENCONTRADO:
+        # Verificar notario (nueva estructura)
+        notario_valido = False
+        if self.notario and len(self.notario) > 0:
+            notario_obj = self.notario[0]
+            if notario_obj.nombre and notario_obj.nombre != NO_ENCONTRADO:
+                notario_valido = True
+        
+        if not notario_valido:
             no_encontrados.append("notario")
         if self.numero_escritura is None:
             no_encontrados.append("numero_escritura")
@@ -191,16 +291,100 @@ class EscrituraPublicaFlexible(BaseModel):
 
 
 # =============================================================================
-# MODELOS ESTRICTOS (Para validación inicial)
+# MODELOS ESTRICTOS
 # =============================================================================
 
-class Representante(BaseModel):
+class Notario(BaseModel):
     """
-    Representante con campos obligatorios.
+    Modelo ESTRICTO para datos del notario.
     
-    NOTA: El campo 'escritura' acepta tanto str como int porque
-    DeepSeek a veces devuelve el número como entero.
+    ESTRUCTURA:
+    ===========
+    - nombre: Nombre completo del notario (OBLIGATORIO)
+    - numero_notario: Número de notaría, 2-3 dígitos (OBLIGATORIO)
+    - municipio: Municipio donde ejerce (OBLIGATORIO)
+    - escritura: Número de escritura, 4-7 dígitos (OBLIGATORIO)
+    - fecha_documento: Fecha del documento (OBLIGATORIO)
+    
+    VALIDACIONES:
+    =============
+    - numero_notario debe tener 2-3 dígitos (ej: "45", "123")
+    - escritura debe tener 4-7 dígitos (ej: "2307", "1234567")
+    
+    ¿Por qué estas validaciones?
+    ============================
+    En México, los números de notaría típicamente van del 1 al 999,
+    mientras que los números de escritura pueden ser mucho más altos
+    dependiendo de la antigüedad y actividad de la notaría.
     """
+    
+    nombre: str = Field(..., description="Nombre del notario")
+    numero_notario: Union[str, int] = Field(..., description="Número de notaría (2-3 dígitos)")
+    municipio: str = Field(..., description="Municipio de la notaría")
+    escritura: Union[str, int] = Field(..., description="Número de escritura (4-7 dígitos)")
+    fecha_documento: str = Field(..., description="Fecha del documento")
+    
+    @field_validator('numero_notario', mode='before')
+    @classmethod
+    def validar_numero_notario(cls, v):
+        """
+        Valida y normaliza el número de notario.
+        
+        REGLAS:
+        =======
+        - Acepta int o string
+        - Convierte a string
+        - Debe tener 2-3 dígitos (10-999)
+        
+        Ejemplos válidos: 45, "45", 123, "123"
+        Ejemplos inválidos: 1, "1", 1234, "1234"
+        """
+        if isinstance(v, int):
+            v = str(v)
+        
+        # Limpiar espacios
+        v = str(v).strip()
+        
+        # Validar longitud (2-3 dígitos)
+        if len(v) < 2 or len(v) > 3:
+            raise ValueError(
+                f"numero_notario debe tener 2-3 dígitos, recibido: '{v}' ({len(v)} dígitos)"
+            )
+        
+        return v
+    
+    @field_validator('escritura', mode='before')
+    @classmethod
+    def validar_escritura(cls, v):
+        """
+        Valida y normaliza el número de escritura.
+        
+        REGLAS:
+        =======
+        - Acepta int o string
+        - Convierte a string
+        - Debe tener 4-7 dígitos (1000-9999999)
+        
+        Ejemplos válidos: 2307, "2307", 1234567, "1234567"
+        Ejemplos inválidos: 123, "123", 12345678, "12345678"
+        """
+        if isinstance(v, int):
+            v = str(v)
+        
+        # Limpiar espacios
+        v = str(v).strip()
+        
+        # Validar longitud (4-7 dígitos)
+        if len(v) < 4 or len(v) > 7:
+            raise ValueError(
+                f"escritura debe tener 4-7 dígitos, recibido: '{v}' ({len(v)} dígitos)"
+            )
+        
+        return v
+
+
+class Representante(BaseModel):
+    """Representante con campos obligatorios."""
     
     nombre: str = Field(..., description="Nombre del representante")
     en_calidad: str = Field(..., description="En qué calidad actúa")
@@ -211,7 +395,6 @@ class Representante(BaseModel):
     @field_validator('escritura', mode='before')
     @classmethod
     def convertir_escritura_a_string(cls, v):
-        """Convierte int a string si es necesario."""
         if isinstance(v, int):
             return str(v)
         return v
@@ -239,11 +422,32 @@ class Adquiriente(BaseModel):
 class EscrituraPublica(BaseModel):
     """
     Modelo ESTRICTO - Valida que los campos obligatorios estén presentes.
+    
+    CAMBIO EN notario:
+    ==================
+    Antes: notario era un string simple
+    Ahora: notario es un array con exactamente UN objeto Notario
+    
+    El objeto Notario contiene:
+    - nombre: Nombre del notario
+    - numero_notario: Número de notaría (2-3 dígitos)
+    - municipio: Municipio de la notaría
+    - escritura: Número de escritura (4-7 dígitos)
+    - fecha_documento: Fecha del documento
     """
     
-    notario: str = Field(..., description="Nombre del notario")
+    # notario ahora es una LISTA con exactamente 1 elemento
+    notario: List[Notario] = Field(
+        ..., 
+        min_length=1, 
+        max_length=1,
+        description="Array con un solo objeto Notario"
+    )
+    
+    # Estos campos se mantienen para compatibilidad
     numero_escritura: int = Field(..., description="Número de escritura")
     fecha_documento: str = Field(..., description="Fecha del documento")
+    
     tipo_titular: str = Field(..., description="empresa o persona")
     titulares: List[Titular] = Field(..., min_length=1)
     adquirientes: List[Adquiriente] = Field(..., min_length=1)
@@ -261,21 +465,18 @@ class EscrituraPublica(BaseModel):
     @model_validator(mode='after')
     def validar_representantes(self):
         """
-        Valida la presencia de representante según el tipo de titular.
+        Valida representante según tipo de titular.
         
-        REGLA DE NEGOCIO:
-        =================
+        REGLA:
         - EMPRESA: Representante es OBLIGATORIO
-          (las sociedades siempre actúan a través de un apoderado)
-        
-        - PERSONA FÍSICA: Representante es OPCIONAL
-          (puede actuar por derecho propio o mediante apoderado)
+        - PERSONA: Representante es OPCIONAL
         """
         if self.tipo_titular.lower() == "empresa":
             for i, titular in enumerate(self.titulares):
                 if titular.representante is None:
-                    raise ValueError(f"Titular #{i+1} es empresa y debe tener representante")
-        # Para persona física, no se valida (representante es opcional)
+                    raise ValueError(
+                        f"Titular #{i+1} es EMPRESA y DEBE tener representante"
+                    )
         return self
 
 
@@ -337,7 +538,6 @@ def get_campos_no_obligatorios() -> List[str]:
 def validar_json_flexible(json_data: Dict[str, Any]) -> EscrituraPublicaFlexible:
     """
     Valida JSON con modelo flexible.
-    
     Nunca falla - acepta lo que venga y llena el resto con defaults.
     """
     json_normalizado = _normalizar_campos(json_data)
@@ -421,248 +621,32 @@ def generar_feedback_error(
     error_validacion: str, 
     json_anterior: dict = None,
     tipo_titular: str = None
-) -> dict:
+) -> str:
     """
-    Genera un análisis detallado del error para el retry.
-    
-    MEJORA: Ahora devuelve un diccionario con información estructurada
-    que puede ser usada por build_validation_prompt.
-    
-    Args:
-        error_validacion: Error de Pydantic o mensaje de error
-        json_anterior: JSON del intento anterior
-        tipo_titular: Tipo ya clasificado ("empresa" o "persona")
-    
-    Returns:
-        dict con:
-        - campos_ok: Lista de campos que están correctos
-        - campos_faltantes: Lista de campos que faltan
-        - campos_incorrectos: Lista de campos con formato incorrecto
-        - problemas: Lista de problemas específicos detectados
-        - sugerencias: Lista de sugerencias de corrección
-        - json_anterior: El JSON anterior (para referencia)
+    Genera feedback para retry basado en el error.
     """
-    import re
+    feedback = []
+    feedback.append("=" * 50)
+    feedback.append("🔄 CORRECCIÓN REQUERIDA")
+    feedback.append("=" * 50)
     
-    resultado = {
-        "campos_ok": [],
-        "campos_faltantes": [],
-        "campos_incorrectos": [],
-        "problemas": [],
-        "sugerencias": [],
-        "json_anterior": json_anterior,
-        "tipo_titular": tipo_titular
-    }
+    if tipo_titular:
+        feedback.append(f"\n⚠️ TIPO TITULAR: {tipo_titular.upper()}")
     
-    campos_requeridos = [
-        "notario", "numero_escritura", "fecha_documento", 
-        "tipo_titular", "titulares", "adquirientes",
-        "monto_operacion", "tipo_moneda"
-    ]
+    if error_validacion:
+        feedback.append(f"\n❌ Error: {error_validacion[:300]}")
     
     if json_anterior:
-        # Analizar qué campos están bien
-        for campo in campos_requeridos:
-            if campo in json_anterior:
-                valor = json_anterior[campo]
-                # Verificar si el valor es válido
-                if valor is None:
-                    resultado["campos_faltantes"].append(campo)
-                elif isinstance(valor, list):
-                    if len(valor) > 0:
-                        resultado["campos_ok"].append(campo)
-                    else:
-                        resultado["campos_faltantes"].append(campo)
-                elif isinstance(valor, str):
-                    if valor.strip() and valor != NO_ENCONTRADO:
-                        resultado["campos_ok"].append(campo)
-                    else:
-                        resultado["campos_faltantes"].append(campo)
-                elif isinstance(valor, (int, float)):
-                    resultado["campos_ok"].append(campo)
-                else:
-                    resultado["campos_ok"].append(campo)
-            else:
-                resultado["campos_faltantes"].append(campo)
-        
-        # Detectar problemas específicos
-        
-        # Problema 1: tipo_titular en lugar incorrecto
-        if "titulares" in json_anterior and isinstance(json_anterior["titulares"], list):
-            for i, titular in enumerate(json_anterior["titulares"]):
-                if isinstance(titular, dict) and "tipo_titular" in titular:
-                    resultado["problemas"].append(
-                        f"tipo_titular está DENTRO de titulares[{i}], debe ir en la RAÍZ del JSON"
-                    )
-                    resultado["sugerencias"].append(
-                        "Mueve 'tipo_titular' fuera de titulares, al nivel principal del JSON"
-                    )
-        
-        # Problema 2: nombres de campos incorrectos
-        nombres_incorrectos = {
-            "nombre_titular": "nombre",
-            "nombre_completo": "nombre",
-            "razon_social": "nombre",
-            "actua": "actua_por",
-            "num_escritura": "numero_escritura",
-            "fecha": "fecha_documento",
-            "fecha_escritura": "fecha_documento",
-            "monto": "monto_operacion",
-            "precio": "monto_operacion",
-            "moneda": "tipo_moneda",
-        }
-        
-        def buscar_nombres_incorrectos(obj, path=""):
-            if isinstance(obj, dict):
-                for key, value in obj.items():
-                    if key in nombres_incorrectos:
-                        resultado["problemas"].append(
-                            f"Campo incorrecto: '{key}' → debe ser '{nombres_incorrectos[key]}'"
-                        )
-                        resultado["campos_incorrectos"].append(key)
-                    buscar_nombres_incorrectos(value, f"{path}.{key}")
-            elif isinstance(obj, list):
-                for i, item in enumerate(obj):
-                    buscar_nombres_incorrectos(item, f"{path}[{i}]")
-        
-        buscar_nombres_incorrectos(json_anterior)
-        
-        # Problema 3: representante como string (debe ser objeto o null)
-        if "titulares" in json_anterior:
-            for i, titular in enumerate(json_anterior.get("titulares", [])):
-                if isinstance(titular, dict):
-                    rep = titular.get("representante")
-                    if isinstance(rep, str):
-                        resultado["problemas"].append(
-                            f"titulares[{i}].representante es STRING, debe ser OBJETO o null"
-                        )
-                        resultado["sugerencias"].append(
-                            "Cambia representante a un objeto con: nombre, en_calidad, escritura, bis, fecha_poder"
-                        )
-        
-        # Problema 4: numero_escritura como string
-        if "numero_escritura" in json_anterior:
-            num = json_anterior["numero_escritura"]
-            if isinstance(num, str):
-                resultado["problemas"].append(
-                    f"numero_escritura es STRING ('{num}'), debe ser INTEGER"
-                )
-                resultado["sugerencias"].append(
-                    "Quita las comillas de numero_escritura, debe ser un número sin comillas"
-                )
-        
-        # Problema 5: Empresa sin representante
-        if tipo_titular == "empresa" and "titulares" in json_anterior:
-            for i, titular in enumerate(json_anterior.get("titulares", [])):
-                if isinstance(titular, dict):
-                    rep = titular.get("representante")
-                    if rep is None:
-                        resultado["problemas"].append(
-                            f"titulares[{i}] es EMPRESA pero no tiene representante (es OBLIGATORIO)"
-                        )
-                        resultado["sugerencias"].append(
-                            "Las empresas SIEMPRE deben tener representante. Busca quién representa a la empresa."
-                        )
+        import json
+        feedback.append("\n📋 JSON anterior:")
+        feedback.append(json.dumps(json_anterior, indent=2, ensure_ascii=False)[:500])
     
-    # Parsear errores de Pydantic
-    if error_validacion:
-        # Buscar campos requeridos faltantes
-        matches = re.findall(r'(\w+)\s+Field required', error_validacion)
-        for campo in matches:
-            if campo not in resultado["campos_faltantes"]:
-                resultado["campos_faltantes"].append(campo)
-        
-        # Buscar errores de tipo
-        if "Input should be a valid integer" in error_validacion:
-            resultado["sugerencias"].append(
-                "Hay campos que deberían ser números pero son texto. Revisa numero_escritura y edad."
-            )
-    
-    return resultado
-
-
-def formatear_feedback_para_prompt(analisis: dict) -> str:
-    """
-    Convierte el análisis de feedback en texto para el prompt.
-    
-    Args:
-        analisis: Diccionario generado por generar_feedback_error
-    
-    Returns:
-        String formateado para incluir en el prompt
-    """
-    import json
-    
-    lines = []
-    lines.append("=" * 50)
-    lines.append("🔄 CORRECCIÓN REQUERIDA")
-    lines.append("=" * 50)
-    
-    # Tipo titular (mantener consistencia con clasificación)
-    if analisis.get("tipo_titular"):
-        lines.append(f"\n⚠️ IMPORTANTE: El tipo de titular es {analisis['tipo_titular'].upper()}")
-        lines.append(f"   NO cambies esto, ya fue clasificado correctamente.")
-    
-    # Campos OK
-    if analisis["campos_ok"]:
-        lines.append(f"\n✅ CAMPOS CORRECTOS (no los cambies):")
-        lines.append(f"   {', '.join(analisis['campos_ok'])}")
-    
-    # Campos faltantes
-    if analisis["campos_faltantes"]:
-        lines.append(f"\n❌ CAMPOS FALTANTES (agrégalos):")
-        for campo in analisis["campos_faltantes"]:
-            lines.append(f"   - {campo}")
-    
-    # Campos con nombre incorrecto
-    if analisis["campos_incorrectos"]:
-        lines.append(f"\n⚠️ CAMPOS CON NOMBRE INCORRECTO:")
-        for campo in analisis["campos_incorrectos"]:
-            lines.append(f"   - {campo}")
-    
-    # Problemas detectados
-    if analisis["problemas"]:
-        lines.append(f"\n🔍 PROBLEMAS DETECTADOS:")
-        for i, problema in enumerate(analisis["problemas"], 1):
-            lines.append(f"   {i}. {problema}")
-    
-    # Sugerencias
-    if analisis["sugerencias"]:
-        lines.append(f"\n💡 SUGERENCIAS DE CORRECCIÓN:")
-        for i, sugerencia in enumerate(analisis["sugerencias"], 1):
-            lines.append(f"   {i}. {sugerencia}")
-    
-    # JSON anterior (truncado)
-    if analisis.get("json_anterior"):
-        lines.append(f"\n📋 TU JSON ANTERIOR:")
-        lines.append("-" * 30)
-        try:
-            json_str = json.dumps(analisis["json_anterior"], indent=2, ensure_ascii=False)
-            if len(json_str) > 1500:
-                json_str = json_str[:1500] + "\n... (truncado)"
-            lines.append(json_str)
-        except:
-            lines.append(str(analisis["json_anterior"])[:1500])
-    
-    lines.append("\n" + "=" * 50)
-    lines.append("Corrige los problemas y devuelve el JSON completo.")
-    lines.append("=" * 50)
-    
-    return "\n".join(lines)
+    return "\n".join(feedback)
 
 
 def analizar_json_parcial(json_data: dict, tipo_titular: str = None) -> dict:
     """
     Analiza un JSON parcial y devuelve información detallada.
-    
-    MEJORA: Ahora también detecta problemas específicos en la estructura.
-    
-    Args:
-        json_data: JSON a analizar
-        tipo_titular: Tipo clasificado ("empresa" o "persona") para reglas específicas
-    
-    Returns:
-        dict con campos_encontrados, campos_faltantes, porcentaje, problemas_detectados
     """
     campos_requeridos = [
         "notario", "numero_escritura", "fecha_documento", 
@@ -689,8 +673,6 @@ def analizar_json_parcial(json_data: dict, tipo_titular: str = None) -> dict:
             faltantes.append(campo)
     
     # Detectar problemas específicos
-    
-    # Problema 1: tipo_titular en lugar incorrecto
     if "titulares" in json_data and isinstance(json_data["titulares"], list):
         for i, titular in enumerate(json_data["titulares"]):
             if isinstance(titular, dict):
@@ -698,46 +680,13 @@ def analizar_json_parcial(json_data: dict, tipo_titular: str = None) -> dict:
                     problemas.append(
                         f"tipo_titular dentro de titulares[{i}], debe ir en raíz"
                     )
-    
-    # Problema 2: nombres de campos incorrectos
-    nombres_incorrectos = ["nombre_titular", "nombre_completo", "razon_social"]
-    if "titulares" in json_data:
-        for i, titular in enumerate(json_data.get("titulares", [])):
-            if isinstance(titular, dict):
-                for nombre_inc in nombres_incorrectos:
-                    if nombre_inc in titular:
-                        problemas.append(
-                            f"titulares[{i}] usa '{nombre_inc}', debe ser 'nombre'"
-                        )
-    
-    # Problema 3: representante como string
-    if "titulares" in json_data:
-        for i, titular in enumerate(json_data.get("titulares", [])):
-            if isinstance(titular, dict):
-                rep = titular.get("representante")
-                if isinstance(rep, str):
+                if "representante_legal" in titular:
                     problemas.append(
-                        f"titulares[{i}].representante es string, debe ser objeto"
+                        f"titulares[{i}] tiene representante_legal, debe ser representante objeto"
                     )
     
-    # Problema 4: numero_escritura como string
-    if "numero_escritura" in json_data:
-        num = json_data["numero_escritura"]
-        if isinstance(num, str):
-            problemas.append(
-                f"numero_escritura es string, debe ser integer"
-            )
-    
-    # Problema 5: Empresa sin representante (solo si sabemos el tipo)
-    tipo = tipo_titular or json_data.get("tipo_titular", "")
-    if tipo == "empresa" and "titulares" in json_data:
-        for i, titular in enumerate(json_data.get("titulares", [])):
-            if isinstance(titular, dict):
-                rep = titular.get("representante")
-                if rep is None:
-                    problemas.append(
-                        f"titulares[{i}] es empresa pero no tiene representante"
-                    )
+    if "documento" in json_data:
+        problemas.append("Campo 'documento' no permitido en raíz")
     
     porcentaje = (len(encontrados) / len(campos_requeridos)) * 100
     
@@ -749,10 +698,6 @@ def analizar_json_parcial(json_data: dict, tipo_titular: str = None) -> dict:
     }
 
 
-# =============================================================================
-# CÓDIGO DE PRUEBA
-# =============================================================================
-
 if __name__ == "__main__":
     import json
     
@@ -760,13 +705,12 @@ if __name__ == "__main__":
     print("PRUEBA DE MODELOS PYDANTIC")
     print("=" * 60)
     
-    # JSON de prueba (incompleto)
     json_prueba = {
-        "notario": "GUILLERMO LOZA RAMÍREZ",
-        "numero_escritura": 18226,
+        "notario": "TEST",
+        "numero_escritura": 123,
         "tipo_titular": "empresa",
         "titulares": [
-            {"nombre": "DESARROLLO TURISTICO LOS COCOS S.A. de C.V."}
+            {"nombre": "Empresa Test", "actua_por": "representación"}
         ]
     }
     

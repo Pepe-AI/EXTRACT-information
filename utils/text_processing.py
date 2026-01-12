@@ -1,27 +1,23 @@
 """
 utils/text_processing.py - Utilidades para procesamiento de texto OCR
 
-MEJORAS PARA REDUCIR VARIABILIDAD:
-===================================
-1. Limpieza más agresiva del ruido OCR
-2. NUEVO: Extracción por regex de datos críticos (número de escritura, montos)
-3. NUEVO: Normalización de formatos de fecha
-
-¿Por qué extracción por regex?
-==============================
-Los datos numéricos como "ESCRITURA NÚMERO 18,226" son fáciles de extraer
-con expresiones regulares. Si el LLM falla en extraerlos, usamos regex
-como fallback. Esto GARANTIZA que campos críticos siempre se extraigan.
+Funciones principales:
+- clean_ocr_text(): Limpia texto extraído por OCR
+- truncate_text(): Trunca texto largo para el contexto del LLM
+- format_for_prompt(): Prepara texto para el prompt
+- extract_think_block(): Extrae bloque <think> de DeepSeek R1
+- extract_json_from_response(): Extrae JSON de la respuesta del LLM
+- process_deepseek_response(): Procesa respuesta completa de DeepSeek
 """
 
 import re
 import json
-from typing import Optional, Dict, Any, Tuple, List
+from typing import Optional, Dict, Any, Tuple
 from collections import Counter
 
 
 # =============================================================================
-# PATRONES DE RUIDO OCR (MEJORADO)
+# PATRONES DE RUIDO OCR
 # =============================================================================
 
 NOISE_PATTERNS = [
@@ -65,293 +61,6 @@ HEADER_PATTERNS = [
 
 
 # =============================================================================
-# EXTRACCIÓN POR REGEX (NUEVO - CRÍTICO PARA CONSISTENCIA)
-# =============================================================================
-
-class RegexExtractor:
-    """
-    NUEVA CLASE - Extrae datos críticos usando expresiones regulares.
-    
-    ¿Por qué esto es importante?
-    ============================
-    El LLM a veces falla en extraer datos numéricos simples como el
-    número de escritura. Con regex, podemos GARANTIZAR que estos
-    datos se extraigan correctamente.
-    
-    Este extractor actúa como:
-    1. Validador: Verifica si el LLM extrajo correctamente
-    2. Fallback: Si el LLM falló, proporciona el valor correcto
-    """
-    
-    @staticmethod
-    def extraer_numero_escritura(texto: str) -> Optional[int]:
-        """
-        Extrae el número de escritura del documento.
-        
-        PATRONES QUE BUSCA:
-        ===================
-        - "ESCRITURA NÚMERO 18,226" → 18226
-        - "ESCRITURA PÚBLICA NÚMERO DIECIOCHO MIL DOSCIENTOS VEINTISEIS"
-        - "Escritura número 18226"
-        - "ESCRITURA No. 18,226"
-        
-        Returns:
-            int: Número de escritura, o None si no se encuentra
-        """
-        # Patrón 1: Número con formato (comas, puntos)
-        # Busca: ESCRITURA [PÚBLICA] [NÚMERO/No./NUM] seguido de número
-        patrones_numero = [
-            r'ESCRITURA\s+(?:P[UÚ]BLICA\s+)?(?:N[UÚ]MERO|No\.?|NUM\.?)\s*[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
-            r'ESCRITURA\s+(\d{1,3}(?:[,.\s]\d{3})*)',
-            r'N[UÚ]MERO\s+DE\s+ESCRITURA[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
-        ]
-        
-        for patron in patrones_numero:
-            match = re.search(patron, texto, re.IGNORECASE)
-            if match:
-                # Limpiar el número (quitar comas, puntos, espacios)
-                numero_str = re.sub(r'[,.\s]', '', match.group(1))
-                try:
-                    return int(numero_str)
-                except ValueError:
-                    continue
-        
-        # Patrón 2: Número en palabras (más complejo)
-        # Ejemplo: "DIECIOCHO MIL DOSCIENTOS VEINTISEIS"
-        numero_palabras = RegexExtractor._extraer_numero_en_palabras(texto)
-        if numero_palabras:
-            return numero_palabras
-        
-        return None
-    
-    @staticmethod
-    def _extraer_numero_en_palabras(texto: str) -> Optional[int]:
-        """
-        Convierte números escritos en palabras a dígitos.
-        
-        Ejemplo: "DIECIOCHO MIL DOSCIENTOS VEINTISEIS" → 18226
-        
-        NOTA: Esta es una implementación simplificada para números comunes.
-        """
-        # Diccionario de conversión
-        palabras_a_numeros = {
-            'cero': 0, 'uno': 1, 'una': 1, 'dos': 2, 'tres': 3, 'cuatro': 4,
-            'cinco': 5, 'seis': 6, 'siete': 7, 'ocho': 8, 'nueve': 9,
-            'diez': 10, 'once': 11, 'doce': 12, 'trece': 13, 'catorce': 14,
-            'quince': 15, 'dieciseis': 16, 'diecisiete': 17, 'dieciocho': 18,
-            'diecinueve': 19, 'veinte': 20, 'veintiuno': 21, 'veintidos': 22,
-            'veintitres': 23, 'veinticuatro': 24, 'veinticinco': 25,
-            'veintiseis': 26, 'veintisiete': 27, 'veintiocho': 28,
-            'veintinueve': 29, 'treinta': 30, 'cuarenta': 40, 'cincuenta': 50,
-            'sesenta': 60, 'setenta': 70, 'ochenta': 80, 'noventa': 90,
-            'cien': 100, 'ciento': 100, 'doscientos': 200, 'trescientos': 300,
-            'cuatrocientos': 400, 'quinientos': 500, 'seiscientos': 600,
-            'setecientos': 700, 'ochocientos': 800, 'novecientos': 900,
-            'mil': 1000
-        }
-        
-        # Buscar patrón después de "ESCRITURA NÚMERO"
-        match = re.search(
-            r'ESCRITURA\s+(?:P[UÚ]BLICA\s+)?N[UÚ]MERO\s+([A-ZÁÉÍÓÚ\s]+?)(?:\.|,|TOMO|LIBRO|FOLIO)',
-            texto,
-            re.IGNORECASE
-        )
-        
-        if not match:
-            return None
-        
-        palabras_numero = match.group(1).lower().strip()
-        palabras = palabras_numero.replace(' y ', ' ').split()
-        
-        try:
-            resultado = 0
-            actual = 0
-            
-            for palabra in palabras:
-                palabra = palabra.strip()
-                if palabra in palabras_a_numeros:
-                    valor = palabras_a_numeros[palabra]
-                    if valor == 1000:
-                        actual = (actual if actual else 1) * 1000
-                        resultado += actual
-                        actual = 0
-                    elif valor >= 100:
-                        actual += valor
-                    else:
-                        actual += valor
-            
-            resultado += actual
-            return resultado if resultado > 0 else None
-            
-        except Exception:
-            return None
-    
-    @staticmethod
-    def extraer_monto_operacion(texto: str) -> Optional[str]:
-        """
-        Extrae el monto de la operación.
-        
-        PATRONES QUE BUSCA:
-        ===================
-        - "$600,000.00"
-        - "SEISCIENTOS MIL PESOS"
-        - "$1,500,000.00 MXN"
-        
-        Returns:
-            str: Monto formateado, o None si no se encuentra
-        """
-        # Patrón para montos en formato numérico
-        patrones_monto = [
-            # $600,000.00 (SEISCIENTOS MIL PESOS)
-            r'\$\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{2})?)',
-            # precio de: $600,000
-            r'precio\s+(?:de\s+)?(?:esta\s+operaci[oó]n\s+)?(?:fue\s+)?(?:la\s+cantidad\s+de\s+)?\$?\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{2})?)',
-            # monto de la operación: $600,000
-            r'monto\s+(?:de\s+)?(?:la\s+)?operaci[oó]n[:\s]+\$?\s*(\d{1,3}(?:[,]\d{3})*(?:\.\d{2})?)',
-        ]
-        
-        for patron in patrones_monto:
-            match = re.search(patron, texto, re.IGNORECASE)
-            if match:
-                monto = match.group(1)
-                # Asegurar formato con $
-                if not monto.startswith('$'):
-                    monto = f"${monto}"
-                return monto
-        
-        return None
-    
-    @staticmethod
-    def extraer_fecha_documento(texto: str) -> Optional[str]:
-        """
-        Extrae la fecha del documento.
-        
-        PATRONES QUE BUSCA:
-        ===================
-        - "A los (22) veintidós días del mes de marzo del año 2024"
-        - "11 de abril de 2024"
-        - "22/03/2024"
-        
-        Returns:
-            str: Fecha en formato legible, o None si no se encuentra
-        """
-        # Patrón para fecha en formato legal notarial
-        patron_legal = r'(?:A\s+los\s+)?(?:\(\d+\)\s+)?(\w+)\s+d[ií]as?\s+del\s+mes\s+de\s+(\w+)\s+del\s+a[ñn]o\s+(\d{4})'
-        match = re.search(patron_legal, texto, re.IGNORECASE)
-        if match:
-            dia = match.group(1)
-            mes = match.group(2)
-            año = match.group(3)
-            return f"{dia} de {mes} de {año}"
-        
-        # Patrón para fecha simple
-        patron_simple = r'(\d{1,2})\s+de\s+(\w+)\s+(?:de\s+)?(\d{4})'
-        match = re.search(patron_simple, texto, re.IGNORECASE)
-        if match:
-            return f"{match.group(1)} de {match.group(2)} de {match.group(3)}"
-        
-        return None
-    
-    @staticmethod
-    def extraer_nombre_notario(texto: str) -> Optional[str]:
-        """
-        Extrae el nombre del notario.
-        
-        PATRONES QUE BUSCA:
-        ===================
-        - "GUILLERMO LOZA RAMÍREZ, Notario titular"
-        - "Licenciado Juan Pérez, Notario Público"
-        - "ante mí, [Lic.] NOMBRE APELLIDO, Notario"
-        
-        Returns:
-            str: Nombre del notario, o None si no se encuentra
-        """
-        patrones = [
-            # "ante mí, [Lic./Licenciado] NOMBRE, Notario"
-            r'ante\s+m[ií],?\s+(?:Lic(?:enciado)?\.?\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?),?\s+Notario',
-            # "NOMBRE APELLIDO, Notario titular/público"
-            r'([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]+?),?\s+Notario\s+(?:titular|p[uú]blico)',
-            # En el encabezado: "MD. Guillermo Loza Ramírez"
-            r'(?:MD|Lic|Dr)\.?\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñA-ZÁÉÍÓÚÑ\s]+?)(?:\n|Notario|NOTARIO)',
-        ]
-        
-        for patron in patrones:
-            match = re.search(patron, texto, re.IGNORECASE)
-            if match:
-                nombre = match.group(1).strip()
-                # Limpiar y normalizar
-                nombre = re.sub(r'\s+', ' ', nombre)
-                return nombre
-        
-        return None
-    
-    @staticmethod
-    def detectar_tipo_titular(texto: str) -> str:
-        """
-        Detecta si el titular/vendedor es empresa o persona física.
-        
-        INDICADORES DE EMPRESA:
-        =======================
-        - "S.A.", "S.A. de C.V.", "S. de R.L."
-        - "SOCIEDAD ANÓNIMA", "SOCIEDAD MERCANTIL"
-        - "CAPITAL VARIABLE"
-        
-        Returns:
-            str: "empresa" o "persona"
-        """
-        texto_upper = texto.upper()
-        
-        indicadores_empresa = [
-            'S.A.',
-            'S.A. DE C.V.',
-            'S. DE R.L.',
-            'SOCIEDAD ANÓNIMA',
-            'SOCIEDAD ANONIMA',
-            'SOCIEDAD MERCANTIL',
-            'CAPITAL VARIABLE',
-            'PERSONA MORAL',
-        ]
-        
-        for indicador in indicadores_empresa:
-            if indicador in texto_upper:
-                return "empresa"
-        
-        return "persona"
-    
-    @staticmethod
-    def extraer_rfc(texto: str, nombre: str = None) -> Optional[str]:
-        """
-        Extrae RFC del texto.
-        
-        Formato RFC México:
-        - Personas físicas: 4 letras + 6 dígitos + 3 caracteres (13 total)
-        - Personas morales: 3 letras + 6 dígitos + 3 caracteres (12 total)
-        
-        Returns:
-            str: RFC encontrado, o None
-        """
-        # Patrón RFC
-        patron_rfc = r'\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b'
-        
-        matches = re.findall(patron_rfc, texto.upper())
-        
-        if matches:
-            # Si se proporcionó nombre, intentar encontrar el RFC asociado
-            if nombre:
-                nombre_upper = nombre.upper()
-                # Buscar RFC cerca del nombre
-                for match in matches:
-                    # Verificar si las primeras letras coinciden con el nombre
-                    iniciales = match[:4] if len(match) == 13 else match[:3]
-                    if any(inicial in nombre_upper for inicial in [iniciales[:2], iniciales]):
-                        return match
-            
-            return matches[0]  # Devolver el primero encontrado
-        
-        return None
-
-
-# =============================================================================
 # LIMPIEZA DE TEXTO OCR
 # =============================================================================
 
@@ -373,6 +82,9 @@ def clean_ocr_text(text: str) -> str:
     Returns:
         Texto limpio y normalizado
     """
+    if not text:
+        return ""
+    
     # Normalizar saltos de línea
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     
@@ -439,6 +151,14 @@ def truncate_text(text: str, max_tokens: int = 8000, chars_per_token: float = 4.
     
     Preserva inicio y final del documento (donde suele estar
     la información más importante).
+    
+    Args:
+        text: Texto a truncar
+        max_tokens: Número máximo de tokens
+        chars_per_token: Caracteres por token (estimación)
+        
+    Returns:
+        Texto truncado o el original si no excede el límite
     """
     max_chars = int(max_tokens * chars_per_token)
     
@@ -463,6 +183,13 @@ def format_for_prompt(text: str, max_tokens: int = 8000) -> str:
     Prepara el texto OCR para el prompt.
     
     Aplica limpieza, truncado y envoltura en delimitadores.
+    
+    Args:
+        text: Texto crudo del OCR
+        max_tokens: Máximo de tokens permitidos
+        
+    Returns:
+        Texto formateado listo para el prompt
     """
     clean = clean_ocr_text(text)
     truncated = truncate_text(clean, max_tokens)
@@ -485,9 +212,17 @@ def extract_think_block(text: str) -> Tuple[Optional[str], str]:
     DeepSeek R1 "piensa en voz alta" en bloques <think>...</think>
     antes de dar su respuesta final.
     
+    Args:
+        text: Texto completo de la respuesta
+        
     Returns:
-        Tupla (contenido_think, texto_sin_think)
+        Tupla de (contenido_think, texto_sin_think)
+        - contenido_think: El contenido dentro de <think>, o None
+        - texto_sin_think: El texto con los tags <think> removidos
     """
+    if not text:
+        return None, ""
+    
     think_pattern = re.compile(
         r'<think>(.*?)</think>',
         re.DOTALL | re.IGNORECASE
@@ -510,12 +245,21 @@ def extract_json_from_response(text: str) -> Optional[Dict[str, Any]]:
     El JSON puede venir en:
     1. Bloques ```json ... ```
     2. Bloques ``` ... ```
-    3. JSON directo
+    3. JSON directo en el texto
+    
+    Args:
+        text: Texto que contiene JSON
+        
+    Returns:
+        Dict con el JSON parseado, o None si no se encontró
     """
+    if not text:
+        return None
+    
     # Eliminar bloque <think>
     _, clean_text = extract_think_block(text)
     
-    # Buscar JSON en bloque de código
+    # Buscar JSON en bloque de código markdown
     code_block_pattern = re.compile(
         r'```(?:json)?\s*([\s\S]*?)```',
         re.IGNORECASE
@@ -530,14 +274,15 @@ def extract_json_from_response(text: str) -> Optional[Dict[str, Any]]:
         except json.JSONDecodeError as e:
             print(f"⚠️  Error parseando JSON del bloque de código: {e}")
     
-    # Buscar JSON directo
+    # Buscar JSON directo (objeto o array)
     json_patterns = [
-        re.compile(r'\{[\s\S]*\}'),
-        re.compile(r'\[[\s\S]*\]')
+        re.compile(r'\{[\s\S]*\}'),  # Objeto
+        re.compile(r'\[[\s\S]*\]')   # Array
     ]
     
     for pattern in json_patterns:
         matches = pattern.findall(clean_text)
+        # Ordenar por longitud (el más largo suele ser el JSON completo)
         matches.sort(key=len, reverse=True)
         
         for match in matches:
@@ -554,7 +299,19 @@ def process_deepseek_response(response_text: str) -> Dict[str, Any]:
     """
     Procesa una respuesta completa de DeepSeek R1.
     
-    Combina extracción de <think> y JSON.
+    Combina:
+    - Extracción del bloque <think>
+    - Extracción del JSON
+    
+    Args:
+        response_text: Respuesta completa del modelo
+        
+    Returns:
+        Dict con:
+        - thinking: Contenido del bloque <think> o None
+        - json_data: JSON extraído o None
+        - raw_response: Respuesta sin el bloque <think>
+        - success: True si se extrajo JSON válido
     """
     thinking, clean_response = extract_think_block(response_text)
     json_data = extract_json_from_response(clean_response)
@@ -568,97 +325,360 @@ def process_deepseek_response(response_text: str) -> Dict[str, Any]:
 
 
 # =============================================================================
-# FUNCIÓN PRINCIPAL DE EXTRACCIÓN HÍBRIDA (NUEVO)
-# =============================================================================
-
-def extraer_datos_con_regex(texto: str) -> Dict[str, Any]:
-    """
-    NUEVA FUNCIÓN - Extrae datos usando regex como fallback/validación.
-    
-    Esta función se usa para:
-    1. Validar lo que extrajo el LLM
-    2. Proporcionar valores correctos si el LLM falló
-    
-    Returns:
-        Dict con los datos extraídos por regex
-    """
-    extractor = RegexExtractor()
-    
-    return {
-        'numero_escritura': extractor.extraer_numero_escritura(texto),
-        'monto_operacion': extractor.extraer_monto_operacion(texto),
-        'fecha_documento': extractor.extraer_fecha_documento(texto),
-        'notario': extractor.extraer_nombre_notario(texto),
-        'tipo_titular': extractor.detectar_tipo_titular(texto),
-    }
-
-
-def merge_extractions(llm_data: Dict, regex_data: Dict) -> Dict[str, Any]:
-    """
-    NUEVA FUNCIÓN - Combina extracción del LLM con regex.
-    
-    Prioriza los datos del LLM, pero usa regex como fallback
-    para campos críticos que el LLM pudo haber fallado.
-    
-    Args:
-        llm_data: Datos extraídos por el LLM
-        regex_data: Datos extraídos por regex
-        
-    Returns:
-        Dict combinado con los mejores valores
-    """
-    if not llm_data:
-        llm_data = {}
-    
-    merged = llm_data.copy()
-    
-    # Campos críticos donde regex tiene prioridad si LLM falló
-    campos_criticos = ['numero_escritura', 'monto_operacion', 'tipo_titular']
-    
-    for campo in campos_criticos:
-        valor_llm = llm_data.get(campo)
-        valor_regex = regex_data.get(campo)
-        
-        # Si LLM no tiene el valor o tiene un valor inválido, usar regex
-        if valor_regex is not None:
-            if valor_llm is None:
-                merged[campo] = valor_regex
-                print(f"   📝 {campo}: Usando valor de regex ({valor_regex})")
-            elif campo == 'numero_escritura' and isinstance(valor_llm, str):
-                # Si numero_escritura es string (error), usar regex
-                merged[campo] = valor_regex
-                print(f"   📝 {campo}: Corregido por regex ({valor_regex})")
-    
-    return merged
-
-
-# =============================================================================
 # CÓDIGO DE PRUEBA
 # =============================================================================
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("PRUEBA DE EXTRACCIÓN POR REGEX")
+    print("PRUEBA DE PROCESAMIENTO DE TEXTO")
     print("=" * 60)
     
-    texto_prueba = """
-    ESCRITURA NÚMERO DIECIOCHO MIL DOSCIENTOS VEINTISEIS.
-    TOMO CENTÉSIMO PRIMERO. - LIBRO TERCERO.
+    # Prueba de limpieza
+    texto_sucio = """
+COTEJADO
+ESTADOS UNIDOS MEXICANOS
+NOTARIA 45
+1/5
+
+ESCRITURA PÚBLICA NÚMERO 3125
+
+En la Ciudad de México, ante mí, Licenciado Roberto Martínez,
+comparecen como VENDEDOR: Juan Pérez López.
+
+COTEJADO
+2/5
+"""
     
-    GUILLERMO LOZA RAMÍREZ, Notario titular de la Notaría Número 10 Diez
+    print("\n📄 Texto original:")
+    print(texto_sucio[:200] + "...")
     
-    A los (22) veintidós días del mes de marzo del año 2024 dos mil veinticuatro.
+    texto_limpio = clean_ocr_text(texto_sucio)
+    print("\n🧹 Texto limpio:")
+    print(texto_limpio)
     
-    COMO (PARTE) VENDEDORA o ENAJENANTE: La sociedad mercantil denominada
-    "DESARROLLO TURISTICO LOS COCOS", SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE
+    # Prueba de extracción de JSON
+    print("\n" + "=" * 60)
+    respuesta_con_think = """
+<think>
+Analizando el documento...
+El número de escritura es 3125.
+</think>
+
+```json
+{"numero_escritura": 3125, "notario": "Roberto Martínez"}
+```
+"""
     
-    El precio de esta operación fue la cantidad de: $600,000.00 (SEISCIENTOS MIL PESOS)
+    resultado = process_deepseek_response(respuesta_con_think)
+    print(f"\n✅ JSON extraído: {resultado['json_data']}")
+    print(f"💭 Tiene thinking: {resultado['thinking'] is not None}")
+
+
+# =============================================================================
+# EXTRACCIÓN DE DATOS POR REGEX (RESPALDO/FALLBACK)
+# =============================================================================
+
+def extraer_monto_operacion(texto: str) -> Optional[str]:
+    """
+    Extrae el monto de la operación del documento usando expresiones regulares.
     
-    RFC: DTC9012191U5
+    PATRONES QUE BUSCA (en orden de prioridad):
+    ============================================
+    1. "precio de... $X,XXX.XX" o "precio... $X,XXX.XX"
+    2. "cantidad de $X,XXX.XX"
+    3. "suma de $X,XXX.XX"
+    4. "monto de $X,XXX.XX" o "monto total $X,XXX.XX"
+    5. "valor de $X,XXX.XX"
+    6. "$X,XXX.XX (CANTIDAD EN PALABRAS PESOS)"
+    7. "M.N. $X,XXX.XX" o "$X,XXX.XX M.N."
+    8. Cualquier monto con formato $X,XXX.XX cerca de palabras clave
+    
+    FORMATO DE MONTOS MEXICANOS:
+    ============================
+    - $1,500,000.00 (con comas para miles)
+    - $1500000.00 (sin comas)
+    - $1,500,000 (sin centavos)
+    - 1,500,000.00 (sin símbolo $)
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        str: Monto formateado como "$X,XXX.XX" o None si no se encuentra
     """
     
-    datos = extraer_datos_con_regex(texto_prueba)
+    # Patrón base para montos: captura números con formato mexicano
+    # Soporta: $1,500,000.00 | $1500000.00 | $1,500,000 | 1,500,000.00
+    # IMPORTANTE: El orden importa - primero probar números largos sin comas
+    PATRON_MONTO = r'\$?\s*(\d{4,}(?:\.\d{2})?|\d{1,3}(?:[,]\d{3})+(?:\.\d{2})?|\d{1,3}(?:\.\d{2})?)'
     
-    print("\n📊 Datos extraídos por REGEX:")
-    for campo, valor in datos.items():
-        print(f"   {campo}: {valor}")
+    # Lista de patrones ordenados por especificidad (más específico primero)
+    patrones = [
+        # 1. Precio de esta operación/venta
+        (r'precio\s+(?:de\s+)?(?:esta\s+)?(?:operaci[oó]n|venta|compraventa|enajenaci[oó]n)[\s:]+(?:es\s+)?(?:la\s+cantidad\s+de\s+)?' + PATRON_MONTO, 1),
+        
+        # 2. "la cantidad de $X,XXX.XX"
+        (r'(?:la\s+)?cantidad\s+de\s+' + PATRON_MONTO, 1),
+        
+        # 3. "por la suma de $X,XXX.XX"
+        (r'(?:por\s+)?(?:la\s+)?suma\s+de\s+' + PATRON_MONTO, 1),
+        
+        # 4. "monto de/total/es $X,XXX.XX" - MEJORADO
+        (r'monto\s+(?:de\s+)?(?:la\s+)?(?:operaci[oó]n\s+)?(?:es\s+)?(?:de\s+)?' + PATRON_MONTO, 1),
+        
+        # 5. "valor de $X,XXX.XX"
+        (r'valor\s+(?:de\s+|total\s+)?' + PATRON_MONTO, 1),
+        
+        # 6. "$X,XXX.XX (CANTIDAD EN PALABRAS PESOS)"
+        (PATRON_MONTO + r'\s*\([A-ZÁÉÍÓÚÑ\s]+(?:PESOS?|MIL|MILL[OÓ]N)\)', 0),
+        
+        # 7. Formato "M.N." (Moneda Nacional)
+        (r'M\.?\s*N\.?\s*:?\s*' + PATRON_MONTO, 1),
+        (PATRON_MONTO + r'\s*M\.?\s*N\.?', 0),
+        
+        # 8. "precio: $X,XXX.XX" o "precio $X,XXX.XX" (formato simple) - MEJORADO
+        (r'precio\s*:?\s*' + PATRON_MONTO, 1),
+        
+        # 9. "importe de $X,XXX.XX"
+        (r'importe\s+(?:de\s+|total\s+)?' + PATRON_MONTO, 1),
+        
+        # 10. "precio acordado/pactado"
+        (r'precio\s+(?:acordado|pactado|convenido)\s+(?:fue\s+)?(?:de\s+)?' + PATRON_MONTO, 1),
+        
+        # 11. "precio fue de"
+        (r'precio\s+(?:fue|es|será)\s+(?:de\s+)?(?:la\s+cantidad\s+de\s+)?' + PATRON_MONTO, 1),
+        
+        # 12. Cerca de palabras clave de compraventa
+        (r'(?:compraventa|enajena|vende|transmite)[\s\S]{0,100}' + PATRON_MONTO, 1),
+    ]
+    
+    mejores_montos = []
+    
+    for patron, grupo_idx in patrones:
+        matches = re.finditer(patron, texto, re.IGNORECASE | re.MULTILINE)
+        for match in matches:
+            try:
+                # Obtener el grupo del monto
+                grupos = match.groups()
+                if grupos:
+                    monto_str = grupos[0] if grupo_idx == 1 else grupos[-1]
+                else:
+                    continue
+                
+                if monto_str:
+                    # Limpiar y normalizar el monto
+                    monto_limpio = monto_str.replace(',', '').replace(' ', '')
+                    
+                    try:
+                        monto_num = float(monto_limpio)
+                        
+                        # Filtrar montos muy pequeños (probablemente no son el precio)
+                        # y muy grandes (probablemente errores de OCR)
+                        if 1000 <= monto_num <= 500000000:  # Entre $1,000 y $500M
+                            mejores_montos.append((monto_num, monto_str, match.start()))
+                    except ValueError:
+                        continue
+            except (IndexError, AttributeError):
+                continue
+    
+    if mejores_montos:
+        # Ordenar por:
+        # 1. Montos más "redondos" (típicos de precios) primero
+        # 2. Posición en el documento (primeros párrafos suelen tener el precio)
+        def score_monto(item):
+            monto, _, pos = item
+            # Penalizar posiciones muy tardías en el documento
+            pos_score = pos / 1000
+            # Bonificar montos redondos (múltiplos de 1000)
+            redondez = 0 if monto % 1000 == 0 else (0.5 if monto % 100 == 0 else 1)
+            return redondez + pos_score * 0.1
+        
+        mejores_montos.sort(key=score_monto)
+        mejor_monto = mejores_montos[0][0]
+        
+        # Formatear el monto como moneda mexicana
+        return f"${mejor_monto:,.2f}"
+    
+    return None
+
+
+def extraer_numero_escritura(texto: str) -> Optional[int]:
+    """
+    Extrae el número de escritura del documento.
+    
+    PATRONES QUE BUSCA:
+    ===================
+    - "ESCRITURA NÚMERO 18,226"
+    - "ESCRITURA PÚBLICA NÚMERO 3125"
+    - "Escritura número 18226"
+    - "ESCRITURA No. 18,226"
+    - Números en palabras: "DIECIOCHO MIL DOSCIENTOS VEINTISEIS"
+    
+    Returns:
+        int: Número de escritura, o None si no se encuentra
+    """
+    
+    patrones = [
+        # Patrón 1: ESCRITURA [PÚBLICA] [NÚMERO/No./NUM] seguido de número
+        r'ESCRITURA\s+(?:P[UÚ]BLICA\s+)?(?:N[UÚ]MERO|No\.?|NUM\.?|#)\s*[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
+        
+        # Patrón 2: ESCRITURA seguida directamente de número
+        r'ESCRITURA\s+(\d{1,3}(?:[,.\s]\d{3})*)',
+        
+        # Patrón 3: N[UÚ]MERO DE ESCRITURA
+        r'N[UÚ]MERO\s+DE\s+ESCRITURA[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
+        
+        # Patrón 4: INSTRUMENTO NÚMERO (algunos documentos usan esto)
+        r'INSTRUMENTO\s+(?:N[UÚ]MERO|No\.?)\s*[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
+    ]
+    
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            numero_str = re.sub(r'[,.\s]', '', match.group(1))
+            try:
+                numero = int(numero_str)
+                if 1 <= numero <= 999999:  # Rango válido
+                    return numero
+            except ValueError:
+                continue
+    
+    return None
+
+
+def extraer_fecha_documento(texto: str) -> Optional[str]:
+    """
+    Extrae la fecha del documento.
+    
+    PATRONES QUE BUSCA:
+    ===================
+    - "A los (22) veintidós días del mes de marzo del año 2024"
+    - "A los veintidós días del mes de marzo del año dos mil veinticuatro"
+    - "11 de abril de 2024"
+    - "En la ciudad de... a 15 de mayo de 2024"
+    
+    Returns:
+        str: Fecha en formato legible
+    """
+    
+    MESES = r'(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)'
+    
+    # Patrones para años en palabras
+    ANIO_PALABRAS = r'(?:dos\s+mil\s+(?:veinti(?:uno|dos|tres|cuatro|cinco|seis)|dieci(?:siete|ocho|nueve)|veinte)|\d{4})'
+    
+    patrones = [
+        # Patrón legal notarial con año en números: "A los (22) veintidós días del mes de marzo del año 2024"
+        rf'(?:A\s+los\s+)?(?:\(\d+\)\s+)?(\w+)\s+d[ií]as?\s+del\s+mes\s+de\s+({MESES})\s+(?:del\s+)?a[ñn]o\s+(\d{{4}})',
+        
+        # Patrón legal notarial con año en palabras: "del año dos mil veinticuatro"
+        rf'(?:A\s+los\s+)?(?:\(\d+\)\s+)?(\w+)\s+d[ií]as?\s+del\s+mes\s+de\s+({MESES})\s+(?:del\s+)?a[ñn]o\s+({ANIO_PALABRAS})',
+        
+        # Patrón simple: "15 de mayo de 2024"
+        rf'(\d{{1,2}})\s+de\s+({MESES})\s+(?:de\s+|del\s+)?(\d{{4}})',
+        
+        # Patrón con "a": "a 15 de mayo de 2024"
+        rf'[aA]\s+(\d{{1,2}})\s+de\s+({MESES})\s+(?:de\s+|del\s+)?(\d{{4}})',
+        
+        # Patrón con año en palabras: "15 de mayo de dos mil veinticuatro"
+        rf'(\d{{1,2}})\s+de\s+({MESES})\s+(?:de\s+|del\s+)?({ANIO_PALABRAS})',
+    ]
+    
+    # Diccionario para convertir años en palabras a números
+    ANIOS_PALABRAS = {
+        'dos mil veintiuno': '2021',
+        'dos mil veintidos': '2022',
+        'dos mil veintitres': '2023',
+        'dos mil veinticuatro': '2024',
+        'dos mil veinticinco': '2025',
+        'dos mil veintiseis': '2026',
+        'dos mil diecisiete': '2017',
+        'dos mil dieciocho': '2018',
+        'dos mil diecinueve': '2019',
+        'dos mil veinte': '2020',
+    }
+    
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            grupos = match.groups()
+            if len(grupos) == 3:
+                dia, mes, año = grupos
+                
+                # Convertir año en palabras a número si es necesario
+                año_lower = año.lower().strip()
+                if año_lower in ANIOS_PALABRAS:
+                    año = ANIOS_PALABRAS[año_lower]
+                
+                # Si el día es en palabras, mantenerlo
+                if not dia.isdigit():
+                    dia = dia.capitalize()
+                
+                return f"{dia} de {mes.lower()} de {año}"
+    
+    return None
+
+
+def extraer_datos_con_regex(texto: str) -> Dict[str, Any]:
+    """
+    Extrae datos críticos del documento usando expresiones regulares.
+    
+    Esta función sirve como RESPALDO cuando el LLM falla en extraer
+    datos específicos. Es especialmente útil para campos numéricos
+    como monto_operacion y numero_escritura.
+    
+    Args:
+        texto: Texto completo del documento OCR
+        
+    Returns:
+        Dict con los datos extraídos:
+        - monto_operacion: str o None
+        - numero_escritura: int o None
+        - fecha_documento: str o None
+    """
+    
+    return {
+        'monto_operacion': extraer_monto_operacion(texto),
+        'numero_escritura': extraer_numero_escritura(texto),
+        'fecha_documento': extraer_fecha_documento(texto),
+    }
+
+
+def merge_extractions(llm_data: Dict, regex_data: Dict) -> Dict[str, Any]:
+    """
+    Combina los datos extraídos por el LLM con los datos de regex.
+    
+    ESTRATEGIA:
+    ===========
+    - Priorizar datos del LLM (más contexto)
+    - Usar regex como FALLBACK para campos faltantes
+    - Para monto_operacion: si LLM devuelve "...", usar regex
+    
+    Args:
+        llm_data: Datos extraídos por DeepSeek
+        regex_data: Datos extraídos por regex
+        
+    Returns:
+        Dict combinado con los mejores valores
+    """
+    
+    if not llm_data:
+        llm_data = {}
+    
+    merged = llm_data.copy()
+    
+    # Campos donde regex puede servir de fallback
+    campos_fallback = ['monto_operacion', 'numero_escritura', 'fecha_documento']
+    
+    NO_VALIDOS = [None, '', '...', 'NO SE ENCONTRÓ DATO', '$X,XXX.XX', '$...']
+    
+    for campo in campos_fallback:
+        valor_llm = llm_data.get(campo)
+        valor_regex = regex_data.get(campo)
+        
+        # Si el valor del LLM no es válido, usar regex
+        if valor_llm in NO_VALIDOS or (isinstance(valor_llm, str) and valor_llm.startswith('$X')):
+            if valor_regex is not None:
+                merged[campo] = valor_regex
+                print(f"   📝 {campo}: Usando valor de regex ({valor_regex})")
+    
+    return merged

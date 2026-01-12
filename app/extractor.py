@@ -71,6 +71,9 @@ from utils.text_processing import (
     process_deepseek_response,
     clean_ocr_text,
     format_for_prompt,
+    # NUEVO: Funciones de extracción por regex
+    extraer_datos_con_regex,
+    merge_extractions,
 )
 from utils.prompt_builder import (
     build_extraction_prompt,
@@ -317,11 +320,23 @@ class EscrituraExtractor:
             result.model_used = self.ollama_service.config.model
             
             # =================================================================
-            # PASO 5: Validación post-extracción
+            # PASO 5: Validación post-extracción + FALLBACK REGEX
             # =================================================================
             if json_data:
                 # Validar consistencia del tipo_titular con regex
                 json_data = self._validar_y_corregir_tipo(json_data, tipo_titular)
+                
+                # NUEVO: Extraer datos con regex como fallback
+                print(f"\n🔍 Paso 5: Verificando campos con regex...")
+                datos_regex = extraer_datos_con_regex(ocr_text)  # Usar texto OCR original
+                
+                # Mostrar qué encontró regex
+                for campo, valor in datos_regex.items():
+                    if valor is not None:
+                        print(f"   📝 Regex encontró {campo}: {valor}")
+                
+                # Combinar datos del LLM con regex (regex como fallback)
+                json_data = merge_extractions(json_data, datos_regex)
                 
                 if validacion_estricta:
                     result.validacion_estricta = True

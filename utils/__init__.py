@@ -13,13 +13,20 @@ from .text_processing import (
     clean_ocr_text,
     truncate_text,
     format_for_prompt,
-    process_deepseek_response
+    process_deepseek_response,
+    # NUEVO: Funciones de extracción por regex
+    extraer_monto_operacion,
+    extraer_numero_escritura,
+    extraer_fecha_documento,
+    extraer_datos_con_regex,
+    merge_extractions,
 )
 
 from .prompt_builder import (
     build_extraction_prompt,
     build_validation_prompt,
-    estimate_tokens
+    estimate_tokens,
+    limpiar_json_extra,  # NUEVO: Limpieza de campos extra
 )
 
 from .clasificador import (
@@ -37,11 +44,18 @@ __all__ = [
     'truncate_text',
     'format_for_prompt',
     'process_deepseek_response',
+    # NUEVO: Extracción por regex
+    'extraer_monto_operacion',
+    'extraer_numero_escritura',
+    'extraer_fecha_documento',
+    'extraer_datos_con_regex',
+    'merge_extractions',
     
     # prompt_builder
     'build_extraction_prompt',
     'build_validation_prompt',
     'estimate_tokens',
+    'limpiar_json_extra',  # NUEVO
     
     # clasificador (NUEVO)
     'clasificar_documento',

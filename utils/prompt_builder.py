@@ -35,6 +35,15 @@ CAMPOS_RAIZ_PERMITIDOS = {
     "titulares", "adquirientes", "monto_operacion", "tipo_moneda", "valor_catastral"
 }
 
+# NUEVO: Campos permitidos dentro de cada objeto notario
+CAMPOS_NOTARIO_PERMITIDOS = {
+    "nombre",           # Nombre del notario
+    "numero_notario",   # Número de notaría (2-3 dígitos)
+    "municipio",        # Municipio donde ejerce
+    "escritura",        # Número de escritura (4-7 dígitos)
+    "fecha_documento"   # Fecha del documento
+}
+
 CAMPOS_TITULAR_PERMITIDOS = {
     "nombre", "actua_por", "representante"
 }
@@ -52,14 +61,31 @@ CAMPOS_ADQUIRIENTE_PERMITIDOS = {
 # EJEMPLOS JSON EXACTOS
 # =============================================================================
 
+# NUEVA ESTRUCTURA DE NOTARIO:
+# ============================
+# notario ahora es un ARRAY con UN objeto que contiene:
+# - nombre: Nombre del notario
+# - numero_notario: 2-3 dígitos (ej: "45", "123")
+# - municipio: Municipio de la notaría
+# - escritura: 4-7 dígitos (ej: "2307", "1234567")
+# - fecha_documento: Fecha del documento
+
 EJEMPLO_JSON_EMPRESA = {
-    "notario": "RIGOBERTO OCHOA TORRES",
+    "notario": [
+        {
+            "nombre": "RIGOBERTO OCHOA TORRES",
+            "numero_notario": "45",           # 2-3 dígitos
+            "municipio": "Tepic, Nayarit",
+            "escritura": "2397",              # 4-7 dígitos
+            "fecha_documento": "5 de mayo de 2023"
+        }
+    ],
     "numero_escritura": 2397,
     "fecha_documento": "5 de mayo de 2023",
     "tipo_titular": "empresa",
     "titulares": [
         {
-            "nombre": "Instituto Nacional del Suelo Sustentable (INSS)",
+            "nombre": "Instituto Nacional del Suelo Sustentable (INSUS)",
             "actua_por": "representación",
             "representante": {
                 "nombre": "Ernesto Padilla Aceves",
@@ -86,7 +112,15 @@ EJEMPLO_JSON_EMPRESA = {
 }
 
 EJEMPLO_JSON_EMPRESA_2 = {
-    "notario": "FERNANDO CASTRO RUBIO",
+    "notario": [
+        {
+            "nombre": "FERNANDO CASTRO RUBIO",
+            "numero_notario": "123",          # 2-3 dígitos
+            "municipio": "Guadalajara, Jalisco",
+            "escritura": "2736",              # 4-7 dígitos
+            "fecha_documento": "13 de marzo de 2024"
+        }
+    ],
     "numero_escritura": 2736,
     "fecha_documento": "13 de marzo de 2024",
     "tipo_titular": "empresa",
@@ -119,7 +153,15 @@ EJEMPLO_JSON_EMPRESA_2 = {
 }
 
 EJEMPLO_JSON_PERSONA = {
-    "notario": "María López Hernández",
+    "notario": [
+        {
+            "nombre": "María López Hernández",
+            "numero_notario": "78",           # 2-3 dígitos
+            "municipio": "Ciudad de México",
+            "escritura": "5432",              # 4-7 dígitos
+            "fecha_documento": "20 de junio de 2024"
+        }
+    ],
     "numero_escritura": 5432,
     "fecha_documento": "20 de junio de 2024",
     "tipo_titular": "persona",
@@ -159,6 +201,15 @@ REGLAS ABSOLUTAS QUE DEBES SEGUIR:
 3. NO crees estructuras anidadas adicionales como "documento", "inmueble", "firmas"
 4. USA EXACTAMENTE los nombres de campos que te indico
 5. Si no encuentras un dato, usa null o "NO SE ENCONTRÓ DATO"
+
+ESTRUCTURA ESPECIAL - CAMPO "notario":
+======================================
+El campo "notario" es un ARRAY con UN objeto que tiene 5 campos:
+- nombre: Nombre completo del notario
+- numero_notario: Número de la notaría (2-3 dígitos, ej: "45", "123")
+- municipio: Municipio donde ejerce el notario
+- escritura: Número de escritura (4-7 dígitos, ej: "2307", "18226")
+- fecha_documento: Fecha del documento
 
 CAMPOS PROHIBIDOS (NUNCA LOS USES):
 - representante_legal (el representante va DENTRO del objeto "representante")
@@ -262,7 +313,15 @@ def _build_prompt_empresa(
 ====================================================
 
 {
-    "notario": "NOMBRE COMPLETO DEL NOTARIO",
+    "notario": [
+        {
+            "nombre": "NOMBRE COMPLETO DEL NOTARIO",
+            "numero_notario": "45",
+            "municipio": "CIUDAD, ESTADO",
+            "escritura": "1234",
+            "fecha_documento": "día de mes de año"
+        }
+    ],
     "numero_escritura": 1234,
     "fecha_documento": "día de mes de año",
     "tipo_titular": "empresa",
@@ -293,6 +352,13 @@ def _build_prompt_empresa(
     "tipo_moneda": "MXN",
     "valor_catastral": "$X,XXX.XX" o null
 }
+
+⚠️ IMPORTANTE SOBRE EL CAMPO "notario":
+========================================
+- Es un ARRAY con UN objeto
+- numero_notario: Solo 2-3 dígitos (ej: "45", "123")
+- escritura: Solo 4-7 dígitos (ej: "2307", "18226")
+- fecha_documento: La misma fecha que el campo "fecha_documento" de raíz
 
 """
 
@@ -425,7 +491,15 @@ def _build_prompt_persona(
 ================================================================
 
 {
-    "notario": "NOMBRE DEL NOTARIO",
+    "notario": [
+        {
+            "nombre": "NOMBRE DEL NOTARIO",
+            "numero_notario": "45",
+            "municipio": "CIUDAD, ESTADO",
+            "escritura": "1234",
+            "fecha_documento": "día de mes de año"
+        }
+    ],
     "numero_escritura": 1234,
     "fecha_documento": "día de mes de año",
     "tipo_titular": "persona",
@@ -455,7 +529,15 @@ def _build_prompt_persona(
 =====================================
 
 {
-    "notario": "NOMBRE DEL NOTARIO",
+    "notario": [
+        {
+            "nombre": "NOMBRE DEL NOTARIO",
+            "numero_notario": "78",
+            "municipio": "CIUDAD, ESTADO",
+            "escritura": "5432",
+            "fecha_documento": "día de mes de año"
+        }
+    ],
     "numero_escritura": 1234,
     "fecha_documento": "día de mes de año",
     "tipo_titular": "persona",
@@ -477,6 +559,13 @@ def _build_prompt_persona(
     "tipo_moneda": "MXN",
     "valor_catastral": null
 }
+
+⚠️ IMPORTANTE SOBRE EL CAMPO "notario":
+========================================
+- Es un ARRAY con UN objeto
+- numero_notario: Solo 2-3 dígitos (ej: "45", "78")
+- escritura: Solo 4-7 dígitos (ej: "5432", "12345")
+- fecha_documento: La misma fecha que el campo "fecha_documento" de raíz
 
 """
 
@@ -529,7 +618,15 @@ PLANTILLA JSON (9 campos obligatorios):
 =======================================
 
 {
-    "notario": "NOMBRE",
+    "notario": [
+        {
+            "nombre": "NOMBRE DEL NOTARIO",
+            "numero_notario": "45",
+            "municipio": "CIUDAD, ESTADO",
+            "escritura": "1234",
+            "fecha_documento": "día de mes de año"
+        }
+    ],
     "numero_escritura": 1234,
     "fecha_documento": "fecha",
     "tipo_titular": "empresa" o "persona",
@@ -558,6 +655,7 @@ PLANTILLA JSON (9 campos obligatorios):
 REGLAS:
 - Si es EMPRESA → representante es OBLIGATORIO (objeto)
 - Si es PERSONA → representante es OPCIONAL (null o objeto)
+- "notario" es un ARRAY con un objeto que tiene 5 campos
 
 """
 
@@ -605,7 +703,8 @@ REGLAS ESTRICTAS:
 2. NO agregues campos nuevos
 3. Usa SOLO los 9 campos de la plantilla
 4. El "representante" debe ser un OBJETO con 5 campos, NO un string separado
-5. NO crees estructuras como "documento", "inmueble", "firmas\""""
+5. El "notario" debe ser un ARRAY con UN objeto que tiene 5 campos
+6. NO crees estructuras como "documento", "inmueble", "firmas\""""
 
     user_prompt = f"""
 ⚠️ TU JSON ANTERIOR TIENE ERRORES. CORRÍGELOS.
@@ -633,7 +732,15 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
 ======================================
 
 {{
-    "notario": "...",
+    "notario": [
+        {{
+            "nombre": "NOMBRE DEL NOTARIO",
+            "numero_notario": "45",
+            "municipio": "CIUDAD, ESTADO",
+            "escritura": "1234",
+            "fecha_documento": "día de mes de año"
+        }}
+    ],
     "numero_escritura": 1234,
     "fecha_documento": "...",
     "tipo_titular": "{tipo_titular or 'empresa'}",
@@ -664,6 +771,9 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
     "tipo_moneda": "MXN",
     "valor_catastral": null
 }}
+
+⚠️ RECUERDA: "notario" es un ARRAY con UN objeto de 5 campos:
+   - nombre, numero_notario (2-3 dígitos), municipio, escritura (4-7 dígitos), fecha_documento
 
 """
 
@@ -696,6 +806,8 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
 def _detectar_errores_estructura(json_data: Dict) -> List[str]:
     """
     Detecta errores específicos en la estructura del JSON.
+    
+    ACTUALIZADO: Ahora detecta errores en la estructura de notario.
     """
     errores = []
     
@@ -703,6 +815,31 @@ def _detectar_errores_estructura(json_data: Dict) -> List[str]:
     campos_extra_raiz = set(json_data.keys()) - CAMPOS_RAIZ_PERMITIDOS
     if campos_extra_raiz:
         errores.append(f"Campos NO permitidos en raíz: {', '.join(campos_extra_raiz)}")
+    
+    # Detectar errores en notario
+    notario = json_data.get("notario")
+    if notario is not None:
+        if isinstance(notario, str):
+            errores.append("'notario' debe ser un ARRAY con un objeto, no un string")
+        elif isinstance(notario, dict):
+            errores.append("'notario' debe ser un ARRAY con un objeto, no un objeto directo")
+        elif isinstance(notario, list):
+            if len(notario) == 0:
+                errores.append("'notario' está vacío, debe tener UN objeto")
+            elif len(notario) > 0:
+                notario_obj = notario[0]
+                if isinstance(notario_obj, dict):
+                    # Verificar campos del objeto notario
+                    campos_extra_notario = set(notario_obj.keys()) - CAMPOS_NOTARIO_PERMITIDOS
+                    if campos_extra_notario:
+                        errores.append(f"notario[0] tiene campos extra: {', '.join(campos_extra_notario)}")
+                    
+                    # Verificar campos faltantes
+                    campos_faltantes = CAMPOS_NOTARIO_PERMITIDOS - set(notario_obj.keys())
+                    if campos_faltantes:
+                        errores.append(f"notario[0] le faltan campos: {', '.join(campos_faltantes)}")
+                elif isinstance(notario_obj, str):
+                    errores.append("notario[0] debe ser un OBJETO con 5 campos, no un string")
     
     # Detectar problemas en titulares
     for i, titular in enumerate(json_data.get("titulares", [])):
@@ -737,7 +874,7 @@ def _detectar_errores_estructura(json_data: Dict) -> List[str]:
 
 def limpiar_json_extra(json_data: Dict) -> Dict:
     """
-    Elimina campos no permitidos del JSON.
+    Elimina campos no permitidos del JSON y normaliza la estructura.
     
     Esta función es la ÚLTIMA LÍNEA DE DEFENSA para asegurar
     que el JSON tenga exactamente la estructura esperada.
@@ -745,10 +882,23 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
     PROCESO:
     ========
     1. Filtra solo campos permitidos en raíz
-    2. Limpia cada titular (solo 3 campos)
-    3. Convierte representante_legal → representante objeto
-    4. Limpia cada adquiriente (solo 6 campos)
-    5. Recupera datos de "documento" si existe
+    2. NUEVO: Normaliza notario a array de objetos
+    3. Limpia cada titular (solo 3 campos)
+    4. Convierte representante_legal → representante objeto
+    5. Limpia cada adquiriente (solo 6 campos)
+    6. Recupera datos de "documento" si existe
+    
+    NUEVA ESTRUCTURA DE NOTARIO:
+    ============================
+    notario: [
+        {
+            "nombre": "...",
+            "numero_notario": "XX",      # 2-3 dígitos
+            "municipio": "...",
+            "escritura": "XXXX",         # 4-7 dígitos
+            "fecha_documento": "..."
+        }
+    ]
     
     Args:
         json_data: JSON potencialmente con campos extra
@@ -767,7 +917,10 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
         if campo in json_data:
             resultado[campo] = json_data[campo]
     
-    # 2. Limpiar titulares
+    # 2. NUEVO: Normalizar y limpiar notario
+    resultado["notario"] = _limpiar_notario(json_data, resultado)
+    
+    # 3. Limpiar titulares
     if "titulares" in resultado and isinstance(resultado["titulares"], list):
         titulares_limpios = []
         for titular in resultado["titulares"]:
@@ -819,7 +972,7 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
         
         resultado["titulares"] = titulares_limpios
     
-    # 3. Limpiar adquirientes
+    # 4. Limpiar adquirientes
     if "adquirientes" in resultado and isinstance(resultado["adquirientes"], list):
         adquirientes_limpios = []
         for adq in resultado["adquirientes"]:
@@ -837,7 +990,7 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
                 adquirientes_limpios.append(adq_limpio)
         resultado["adquirientes"] = adquirientes_limpios
     
-    # 4. Recuperar datos del campo "documento" si existe
+    # 5. Recuperar datos del campo "documento" si existe
     if "documento" in json_data and isinstance(json_data["documento"], dict):
         doc = json_data["documento"]
         
@@ -857,14 +1010,126 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
                 else:
                     resultado["monto_operacion"] = str(monto)
         
-        # Recuperar notario
-        if not resultado.get("notario") or resultado.get("notario") == NO_ENCONTRADO:
-            if "notario" in doc and isinstance(doc["notario"], dict):
-                resultado["notario"] = doc["notario"].get("nombre", NO_ENCONTRADO)
-            elif "notario" in doc and isinstance(doc["notario"], str):
-                resultado["notario"] = doc["notario"]
+        # Recuperar notario del documento si no existe en resultado
+        if not resultado.get("notario") or len(resultado["notario"]) == 0:
+            if "notario" in doc:
+                resultado["notario"] = _limpiar_notario(doc, resultado)
     
     return resultado
+
+
+def _limpiar_notario(json_data: Dict, resultado: Dict) -> List[Dict]:
+    """
+    Normaliza y limpia el campo notario.
+    
+    CASOS QUE MANEJA:
+    =================
+    1. notario es STRING (formato antiguo)
+       → Convertir a array con objeto: [{nombre: "...", ...}]
+    
+    2. notario es ARRAY de objetos (formato correcto)
+       → Limpiar cada objeto, mantener solo campos permitidos
+    
+    3. notario es OBJETO sin array
+       → Envolver en array y limpiar
+    
+    4. notario no existe o es None
+       → Retornar array con objeto vacío/defaults
+    
+    Args:
+        json_data: JSON original
+        resultado: JSON resultado parcial (para obtener escritura, fecha)
+        
+    Returns:
+        Array con un objeto notario limpio
+    """
+    
+    notario_raw = json_data.get("notario")
+    
+    # Caso 1: notario es STRING (formato antiguo)
+    if isinstance(notario_raw, str):
+        # Convertir a nuevo formato
+        return [
+            {
+                "nombre": notario_raw if notario_raw != NO_ENCONTRADO else NO_ENCONTRADO,
+                "numero_notario": NO_ENCONTRADO,
+                "municipio": NO_ENCONTRADO,
+                "escritura": str(resultado.get("numero_escritura", NO_ENCONTRADO)),
+                "fecha_documento": resultado.get("fecha_documento", NO_ENCONTRADO)
+            }
+        ]
+    
+    # Caso 2: notario es ARRAY de objetos
+    if isinstance(notario_raw, list):
+        notarios_limpios = []
+        for notario_obj in notario_raw[:1]:  # Solo el primer notario (máximo 1)
+            if isinstance(notario_obj, dict):
+                notario_limpio = _limpiar_objeto_notario(notario_obj, resultado)
+                notarios_limpios.append(notario_limpio)
+        
+        # Si el array estaba vacío, crear objeto con defaults
+        if len(notarios_limpios) == 0:
+            notarios_limpios.append(_crear_notario_vacio(resultado))
+        
+        return notarios_limpios
+    
+    # Caso 3: notario es OBJETO sin array
+    if isinstance(notario_raw, dict):
+        return [_limpiar_objeto_notario(notario_raw, resultado)]
+    
+    # Caso 4: notario no existe o es None
+    return [_crear_notario_vacio(resultado)]
+
+
+def _limpiar_objeto_notario(notario_obj: Dict, resultado: Dict) -> Dict:
+    """
+    Limpia un objeto notario individual.
+    
+    Filtra solo los campos permitidos y asegura valores por defecto.
+    
+    CAMPOS PERMITIDOS:
+    ==================
+    - nombre: Nombre del notario
+    - numero_notario: 2-3 dígitos
+    - municipio: Municipio de la notaría
+    - escritura: 4-7 dígitos
+    - fecha_documento: Fecha del documento
+    """
+    
+    notario_limpio = {}
+    
+    for campo in CAMPOS_NOTARIO_PERMITIDOS:
+        if campo in notario_obj:
+            valor = notario_obj[campo]
+            # Convertir números a string para numero_notario y escritura
+            if campo in ["numero_notario", "escritura"] and isinstance(valor, int):
+                valor = str(valor)
+            notario_limpio[campo] = valor
+        else:
+            # Valores por defecto
+            if campo == "escritura":
+                notario_limpio[campo] = str(resultado.get("numero_escritura", NO_ENCONTRADO))
+            elif campo == "fecha_documento":
+                notario_limpio[campo] = resultado.get("fecha_documento", NO_ENCONTRADO)
+            else:
+                notario_limpio[campo] = NO_ENCONTRADO
+    
+    return notario_limpio
+
+
+def _crear_notario_vacio(resultado: Dict) -> Dict:
+    """
+    Crea un objeto notario con valores por defecto.
+    
+    Usa los datos disponibles en resultado para escritura y fecha.
+    """
+    return {
+        "nombre": NO_ENCONTRADO,
+        "numero_notario": NO_ENCONTRADO,
+        "municipio": NO_ENCONTRADO,
+        "escritura": str(resultado.get("numero_escritura", NO_ENCONTRADO)),
+        "fecha_documento": resultado.get("fecha_documento", NO_ENCONTRADO)
+    }
 
 
 # =============================================================================
@@ -889,47 +1154,88 @@ if __name__ == "__main__":
     print("PRUEBA DEL CONSTRUCTOR DE PROMPTS (ESTRICTO)")
     print("=" * 60)
     
-    # Prueba de limpieza de JSON
-    print("\n📋 Prueba de limpieza de JSON con campos extra:")
+    # Prueba 1: Limpieza de JSON con notario como STRING (formato antiguo)
+    print("\n📋 Prueba 1: Conversión de notario STRING → ARRAY")
     
     json_malo = {
-        "notario": "NO SE ENCONTRÓ DATO",
+        "notario": "RIGOBERTO OCHOA TORRES",  # STRING (formato antiguo)
         "numero_escritura": 2307,
+        "fecha_documento": "5 de mayo de 2023",
         "tipo_titular": "empresa",
         "titulares": [
             {
                 "nombre": "Instituto Nacional...",
-                "actua_por": "NO SE ENCONTRÓ DATO",
+                "actua_por": "representación",
                 "representante": None,
-                "representante_legal": "Ernesto Padilla Aceves"
+                "representante_legal": "Ernesto Padilla Aceves"  # Campo extra a convertir
             }
         ],
         "adquirientes": [
             {
                 "nombre": "Angelita Pérez Soto",
-                "estado_civil": "NO SE ENCONTRÓ DATO",
-                "gestora_negocios": "María..."
+                "estado_civil": "casada",
+                "gestora_negocios": "María..."  # Campo extra a eliminar
             }
-        ],
-        "documento": {
-            "fecha_documento": "05 mayo 2023",
-            "monto_operacion": 8654
-        }
+        ]
     }
     
-    print("\n❌ JSON original (con errores):")
-    print(json.dumps(json_malo, indent=2, ensure_ascii=False)[:600])
+    print("\n❌ JSON original (notario como string):")
+    print(f"   notario: {json_malo['notario']}")
     
     json_limpio = limpiar_json_extra(json_malo)
     
-    print("\n✅ JSON limpio:")
-    print(json.dumps(json_limpio, indent=2, ensure_ascii=False))
+    print("\n✅ JSON limpio (notario como array):")
+    print(json.dumps(json_limpio["notario"], indent=2, ensure_ascii=False))
     
     # Verificaciones
-    assert "documento" not in json_limpio, "documento no debería existir"
-    assert "representante_legal" not in json_limpio["titulares"][0], "representante_legal no debería existir"
-    assert json_limpio["titulares"][0]["representante"] is not None, "representante debería ser objeto"
-    assert json_limpio["titulares"][0]["representante"]["nombre"] == "Ernesto Padilla Aceves"
-    assert "gestora_negocios" not in json_limpio["adquirientes"][0]
+    assert isinstance(json_limpio["notario"], list), "notario debería ser array"
+    assert len(json_limpio["notario"]) == 1, "notario debería tener 1 elemento"
+    assert json_limpio["notario"][0]["nombre"] == "RIGOBERTO OCHOA TORRES"
+    assert json_limpio["notario"][0]["escritura"] == "2307"
+    assert json_limpio["notario"][0]["fecha_documento"] == "5 de mayo de 2023"
+    print("   ✅ notario convertido correctamente a array")
     
-    print("\n✅ Todas las verificaciones pasaron")
+    # Prueba 2: notario ya como ARRAY (formato correcto)
+    print("\n📋 Prueba 2: notario ya como ARRAY (sin cambios)")
+    
+    json_con_array = {
+        "notario": [
+            {
+                "nombre": "FERNANDO CASTRO RUBIO",
+                "numero_notario": "45",
+                "municipio": "Guadalajara",
+                "escritura": "2736",
+                "fecha_documento": "13 de marzo de 2024",
+                "campo_extra": "eliminar"  # Campo extra a eliminar
+            }
+        ],
+        "numero_escritura": 2736,
+        "tipo_titular": "empresa",
+        "titulares": [],
+        "adquirientes": []
+    }
+    
+    json_limpio2 = limpiar_json_extra(json_con_array)
+    
+    assert json_limpio2["notario"][0]["nombre"] == "FERNANDO CASTRO RUBIO"
+    assert "campo_extra" not in json_limpio2["notario"][0]
+    print("   ✅ notario array limpiado correctamente")
+    
+    # Prueba 3: Verificar representante_legal → representante
+    print("\n📋 Prueba 3: Conversión representante_legal → representante")
+    assert json_limpio["titulares"][0]["representante"] is not None
+    assert json_limpio["titulares"][0]["representante"]["nombre"] == "Ernesto Padilla Aceves"
+    print("   ✅ representante_legal convertido a objeto representante")
+    
+    # Prueba 4: Verificar eliminación de campos extra
+    print("\n📋 Prueba 4: Eliminación de campos extra")
+    assert "gestora_negocios" not in json_limpio["adquirientes"][0]
+    print("   ✅ Campo gestora_negocios eliminado")
+    
+    # Mostrar JSON final
+    print("\n" + "=" * 60)
+    print("JSON FINAL LIMPIO:")
+    print("=" * 60)
+    print(json.dumps(json_limpio, indent=2, ensure_ascii=False))
+    
+    print("\n✅ Todas las pruebas pasaron correctamente")
