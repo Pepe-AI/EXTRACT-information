@@ -1,77 +1,104 @@
 """
-app/extractor.py - Extractor con Sistema Híbrido (Plan A + C)
+app/extractor.py - Extractor con Sistema Plan Z (ABDF + E)
 
-ARQUITECTURA HÍBRIDA:
-=====================
+ARQUITECTURA PLAN Z:
+====================
 
-┌─────────────────────────────────────────────────────────────────────┐
-│                         FLUJO COMPLETO                              │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  ┌──────────┐      ┌──────────────┐      ┌─────────────────────┐   │
-│  │   PDF    │ ───> │  Azure OCR   │ ───> │   Texto limpio      │   │
-│  └──────────┘      └──────────────┘      └──────────┬──────────┘   │
-│                                                     │               │
-│                                                     ▼               │
-│                                          ┌──────────────────────┐   │
-│                                          │  FASE 1: CLASIFICAR  │   │
-│                                          │  (Prompt ligero)     │   │
-│                                          │  ~5-10 segundos      │   │
-│                                          └──────────┬───────────┘   │
-│                                                     │               │
-│                              ┌──────────────────────┼───────────┐   │
-│                              │                      │           │   │
-│                              ▼                      ▼           │   │
-│                    ┌─────────────────┐   ┌─────────────────┐    │   │
-│                    │ Validar con     │   │ Validar con     │    │   │
-│                    │ regex (Python)  │   │ regex (Python)  │    │   │
-│                    └────────┬────────┘   └────────┬────────┘    │   │
-│                             │                     │             │   │
-│                             └──────────┬──────────┘             │   │
-│                                        │                        │   │
-│                                        ▼                        │   │
-│                             ┌──────────────────────┐            │   │
-│                             │  FASE 2: EXTRAER     │            │   │
-│                             │  (Prompt específico) │            │   │
-│                             │  Con clasificación   │            │   │
-│                             └──────────┬───────────┘            │   │
-│                                        │                        │   │
-│                                        ▼                        │   │
-│                             ┌──────────────────────┐            │   │
-│                             │  Validación Pydantic │            │   │
-│                             │  + Retry si falla    │            │   │
-│                             └──────────────────────┘            │   │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           PLAN Z - FLUJO COMPLETO                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────┐      ┌──────────────┐      ┌─────────────────────┐           │
+│  │   PDF    │ ───> │  Azure OCR   │ ───> │   Texto limpio      │           │
+│  └──────────┘      └──────────────┘      └──────────┬──────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  FASE 1: CLASIFICAR  │           │
+│                                          │  (Prompt ligero)     │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  Plan D: SEGMENTAR   │           │
+│                                          │  Dividir en secciones│           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  Plan A: REGEX       │           │
+│                                          │  Extracción directa  │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  FASE 2: LLM GENERAL │           │
+│                                          │  Extracción completa │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  Plan B: VALIDACIÓN  │           │
+│                                          │  Cruzar con texto    │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                          ┌──────────┴───────────┐           │
+│                                          │ ¿Campos BAJA conf.?  │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                          ┌──────────┴───────────┐           │
+│                                          ▼                      ▼           │
+│                                   ┌─────────────┐        ┌─────────────┐    │
+│                                   │ NO: Seguir  │        │ SÍ: Plan E  │    │
+│                                   └──────┬──────┘        │ Extracción  │    │
+│                                          │               │ individual  │    │
+│                                          │               └──────┬──────┘    │
+│                                          │                      │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                          ┌──────────────────────┐           │
+│                                          │  Plan F: CONSOLIDAR  │           │
+│                                          │  Evaluar calidad     │           │
+│                                          └──────────┬───────────┘           │
+│                                                     │                       │
+│                                                     ▼                       │
+│                                              RESULTADO FINAL                │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
 
-VENTAJAS DEL SISTEMA HÍBRIDO:
-=============================
-1. Clasificación previa reduce errores de confusión titular/representante
-2. Prompt específico por tipo (empresa vs persona) = menos ambigüedad
-3. Validación con regex como "segunda opinión"
-4. Retry inteligente mantiene la clasificación original
+COMPONENTES DEL PLAN Z:
+=======================
+- Plan A: Extracción por regex (determinística, alta confianza)
+- Plan B: Validación cruzada (detectar alucinaciones del LLM)
+- Plan D: Segmentación del documento (optimizar prompts)
+- Plan E: Extracción individual (recuperar campos fallidos)
+- Plan F: Sistema de confianza (evaluar calidad, marcar revisión)
 """
 
 import os
 import time
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from dataclasses import dataclass, field
 from pydantic import ValidationError
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# Servicios
+# =============================================================================
+# SERVICIOS
+# =============================================================================
 from services.ollama_service import OllamaService, OllamaConfig, get_ollama_service
 from services.azure_ocr_service import AzureOCRService, AzureConfig, get_ocr_service
 
-# Utilidades
+# =============================================================================
+# UTILIDADES EXISTENTES
+# =============================================================================
 from utils.text_processing import (
     process_deepseek_response,
     clean_ocr_text,
     format_for_prompt,
-    # NUEVO: Funciones de extracción por regex
     extraer_datos_con_regex,
     merge_extractions,
 )
@@ -79,7 +106,7 @@ from utils.prompt_builder import (
     build_extraction_prompt,
     build_validation_prompt,
     estimate_tokens,
-    limpiar_json_extra,  # NUEVO: Limpia campos extra del JSON
+    limpiar_json_extra,
 )
 from utils.clasificador import (
     clasificar_documento,
@@ -88,7 +115,9 @@ from utils.clasificador import (
     validar_representante_no_es_institucion,
 )
 
-# Modelos
+# =============================================================================
+# MODELOS EXISTENTES
+# =============================================================================
 from models.escritura import (
     EscrituraPublica,
     EscrituraPublicaFlexible,
@@ -96,6 +125,25 @@ from models.escritura import (
     generar_feedback_error,
     analizar_json_parcial,
 )
+
+# =============================================================================
+# ⭐ NUEVOS IMPORTS PARA PLAN Z (ABDF + E)
+# =============================================================================
+from extraction.segmentador import segmentar_documento
+from extraction.validador_cruzado import ValidadorCruzado
+from extraction.plan_e_extractor import PlanEExtractor, ResultadoPlanE
+from extraction.sistema_confianza import SistemaConfianza
+
+from models.confianza import (
+    ResultadoConfianza,
+    evaluar_calidad_extraccion,
+    NivelResultado,
+    NivelConfianza,
+    identificar_campos_para_plan_e,
+)
+from models.secciones import SeccionesDocumento
+
+from utils.text_processing import extraer_todos_regex
 
 
 # =============================================================================
@@ -116,6 +164,7 @@ class ExtractionConfig:
     - include_examples: Si incluir ejemplos en el prompt
     - save_thinking: Si guardar el bloque <think> de DeepSeek
     - use_classification: Si usar la Fase 1 de clasificación (RECOMENDADO)
+    - use_plan_e: Si usar Plan E para campos problemáticos (RECOMENDADO)
     """
     
     max_retries: int = field(
@@ -132,7 +181,8 @@ class ExtractionConfig:
     )
     include_examples: bool = True
     save_thinking: bool = True
-    use_classification: bool = True  # Habilitar sistema híbrido
+    use_classification: bool = True   # Habilitar sistema híbrido
+    use_plan_e: bool = True           # ⭐ NUEVO: Habilitar Plan E
 
 
 @dataclass
@@ -148,11 +198,21 @@ class ExtractionResult:
     - campos_encontrados: Número de campos extraídos
     - campos_no_encontrados: Lista de campos faltantes
     
-    Atributos de clasificación (NUEVOS):
-    ====================================
+    Atributos de clasificación:
+    ===========================
     - clasificacion: Resultado de la Fase 1
     - tipo_detectado: "empresa" o "persona"
     - metodo_clasificacion: Cómo se determinó el tipo
+    
+    ⭐ NUEVOS Atributos del Plan Z:
+    ===============================
+    - confianza: Nivel de confianza por campo
+    - origen: Origen de cada dato (regex, llm, plan_e)
+    - requiere_revision: Campos que necesitan revisión humana
+    - calidad_general: Porcentaje de calidad de la extracción
+    - plan_e_activado: Si se usó Plan E
+    - campos_mejorados_plan_e: Campos que mejoró Plan E
+    - secciones_detectadas: Secciones del documento identificadas
     
     Atributos de debug:
     ===================
@@ -161,7 +221,7 @@ class ExtractionResult:
     - intentos_realizados: Número de intentos de extracción
     """
     
-    success: bool
+    success: bool = False
     validacion_estricta: bool = False
     data: Optional[Dict[str, Any]] = None
     reporte: Optional[Dict[str, Any]] = None
@@ -174,12 +234,26 @@ class ExtractionResult:
     intentos_realizados: int = 0
     retries_used: int = 0  # Alias para compatibilidad
     campos_encontrados: int = 0
-    campos_no_encontrados: list = field(default_factory=list)
+    campos_no_encontrados: List[str] = field(default_factory=list)
     
-    # Nuevos campos para sistema híbrido
+    # Campos para sistema híbrido (existentes)
     clasificacion: Optional[Dict[str, Any]] = None
     tipo_detectado: str = ""
     metodo_clasificacion: str = ""
+    
+    # ⭐ NUEVOS campos para Plan Z (ABDF + E)
+    confianza: Dict[str, str] = field(default_factory=dict)
+    origen: Dict[str, str] = field(default_factory=dict)
+    requiere_revision: List[str] = field(default_factory=list)
+    calidad_general: float = 0.0
+    detalles_fallo: Optional[Dict[str, Any]] = None
+    
+    # Info del Plan E
+    plan_e_activado: bool = False
+    campos_mejorados_plan_e: List[str] = field(default_factory=list)
+    
+    # Info de segmentación (Plan D)
+    secciones_detectadas: List[str] = field(default_factory=list)
 
 
 # =============================================================================
@@ -188,15 +262,19 @@ class ExtractionResult:
 
 class EscrituraExtractor:
     """
-    Extractor de escrituras públicas con Sistema Híbrido.
+    Extractor de escrituras públicas con Sistema Plan Z.
     
-    FLUJO:
-    ======
+    FLUJO PLAN Z:
+    =============
     1. OCR del PDF (Azure Document Intelligence)
-    2. Limpieza del texto (eliminar ruido, watermarks, etc.)
-    3. FASE 1: Clasificación ligera (determinar tipo de titular)
-    4. FASE 2: Extracción con prompt específico según clasificación
-    5. Validación con Pydantic + retry si falla
+    2. Limpieza del texto
+    3. FASE 1: Clasificación (determinar tipo de titular)
+    4. Plan D: Segmentación del documento
+    5. Plan A: Extracción por regex
+    6. FASE 2: Extracción con LLM general
+    7. Plan B: Validación cruzada
+    8. Plan E: Extracción individual (si hay campos problemáticos)
+    9. Plan F: Consolidación y evaluación de calidad
     
     Ejemplo de uso:
     ===============
@@ -204,7 +282,8 @@ class EscrituraExtractor:
     >>> result = extractor.extract("escritura.pdf")
     >>> if result.success:
     ...     print(result.data)
-    ...     print(f"Tipo: {result.tipo_detectado}")
+    ...     print(f"Calidad: {result.calidad_general}%")
+    ...     print(f"Confianza: {result.confianza}")
     """
     
     def __init__(
@@ -225,15 +304,16 @@ class EscrituraExtractor:
         self.ollama_service = get_ollama_service(ollama_config)
         self.ocr_service = get_ocr_service(azure_config)
         
-        print(f"🔧 Extractor inicializado (Sistema Híbrido)")
+        print(f"🔧 Extractor inicializado (Sistema Plan Z)")
         print(f"   - Modelo: {self.ollama_service.config.model}")
-        print(f"   - Clasificación previa: {'✅ Habilitada' if self.config.use_classification else '❌ Deshabilitada'}")
+        print(f"   - Clasificación previa: {'✅' if self.config.use_classification else '❌'}")
+        print(f"   - Plan E (recuperación): {'✅' if self.config.use_plan_e else '❌'}")
         print(f"   - Max reintentos: {self.config.max_retries}")
         print(f"   - Temperature: {self.config.temperature}")
     
     def extract(self, pdf_path: str) -> ExtractionResult:
         """
-        Extrae información de una escritura pública.
+        Extrae información de una escritura pública usando Plan Z.
         
         Este es el método principal que orquesta todo el flujo.
         
@@ -302,9 +382,9 @@ class EscrituraExtractor:
                 print(f"\n⚠️ Paso 3: Clasificación deshabilitada, usando prompt genérico")
             
             # =================================================================
-            # PASO 4: FASE 2 - Extracción con prompt específico
+            # PASO 4: FASE 2 - Extracción con LLM general
             # =================================================================
-            print(f"\n🤖 Paso 4: FASE 2 - Extrayendo datos...")
+            print(f"\n🤖 Paso 4: FASE 2 - Extrayendo datos con LLM...")
             
             json_data, intentos, validacion_estricta, thinking = self._fase2_extraer(
                 document_text=formatted_text,
@@ -314,56 +394,202 @@ class EscrituraExtractor:
             )
             
             result.intentos_realizados = intentos
-            result.retries_used = intentos  # Alias
+            result.retries_used = intentos
             result.raw_json = json_data
             result.thinking = thinking
             result.model_used = self.ollama_service.config.model
             
             # =================================================================
-            # PASO 5: Validación post-extracción + FALLBACK REGEX
+            # PASO 5: SEGMENTACIÓN DEL DOCUMENTO (Plan D)
             # =================================================================
+            print(f"\n📄 Paso 5: Segmentación del documento (Plan D)...")
+            
+            secciones = segmentar_documento(ocr_text)
+            
+            if secciones.usar_fallback:
+                print(f"   ⚠️ No se detectaron secciones claras, usando texto completo")
+            else:
+                print(f"   ✅ Secciones detectadas: {secciones.secciones_detectadas}")
+                result.secciones_detectadas = secciones.secciones_detectadas
+            
+            # =================================================================
+            # PASO 6: EXTRACCIÓN REGEX EXPANDIDA (Plan A)
+            # =================================================================
+            print(f"\n🔍 Paso 6: Extracción por Regex (Plan A)...")
+            datos_regex = extraer_todos_regex(ocr_text)
+            
+            # Mostrar qué encontró regex
+            campos_regex_encontrados = 0
+            for campo, valor in datos_regex.items():
+                if valor is not None and valor != [] and valor != "":
+                    campos_regex_encontrados += 1
+                    if isinstance(valor, list):
+                        print(f"   ✅ {campo}: {len(valor)} encontrados")
+                    else:
+                        valor_str = str(valor)[:50]
+                        print(f"   ✅ {campo}: {valor_str}")
+            
+            print(f"   📊 Total campos por regex: {campos_regex_encontrados}")
+            
+            # =================================================================
+            # PASO 7: VALIDACIÓN CRUZADA (Plan B)
+            # =================================================================
+            print(f"\n✓ Paso 7: Validación Cruzada (Plan B)...")
+            
+            validador = ValidadorCruzado(ocr_text)
+            validaciones = {}
+            
+            if json_data:
+                validaciones = validador.validar_todos(json_data)
+                
+                # Mostrar correcciones
+                correcciones = 0
+                for nombre, resultado_val in validaciones.items():
+                    if resultado_val.fue_corregido:
+                        correcciones += 1
+                        print(f"   ⚠️ {nombre}: CORREGIDO '{resultado_val.valor_original}' → '{resultado_val.valor_validado}'")
+                    elif not resultado_val.encontrado_en_texto and resultado_val.valor_original:
+                        print(f"   ❓ {nombre}: No validado en texto (valor: {resultado_val.valor_original})")
+                
+                if correcciones > 0:
+                    print(f"   📊 Total correcciones: {correcciones}")
+                else:
+                    print(f"   ✅ No se requirieron correcciones")
+            
+            # =================================================================
+            # PASO 8: CONSOLIDACIÓN INICIAL PARA DETECTAR CAMPOS DUDOSOS
+            # =================================================================
+            print(f"\n📊 Paso 8: Análisis de confianza inicial...")
+            
+            sistema = SistemaConfianza()
+            sistema.agregar_regex(datos_regex)
+            
             if json_data:
                 # Validar consistencia del tipo_titular con regex
                 json_data = self._validar_y_corregir_tipo(json_data, tipo_titular)
+                sistema.agregar_llm(json_data)
+            
+            sistema.aplicar_validacion(validaciones)
+            
+            # Obtener campos con confianza BAJA para Plan E
+            confianza_actual = sistema.obtener_confianza()
+            campos_dudosos = identificar_campos_para_plan_e(
+                datos_regex=datos_regex,
+                datos_llm=json_data or {},
+                confianza=confianza_actual
+            )
+            
+            # Mostrar análisis inicial
+            confianza_alta = sum(1 for c in confianza_actual.values() if c == NivelConfianza.ALTA)
+            confianza_baja = sum(1 for c in confianza_actual.values() if c == NivelConfianza.BAJA)
+            print(f"   ✅ Campos con confianza ALTA: {confianza_alta}")
+            print(f"   ❌ Campos con confianza BAJA: {confianza_baja}")
+            
+            if campos_dudosos:
+                print(f"   🎯 Candidatos para Plan E: {campos_dudosos}")
+            
+            # =================================================================
+            # PASO 9: PLAN E - EXTRACCIÓN INDIVIDUAL (si hay campos dudosos)
+            # =================================================================
+            resultados_plan_e = {}
+            
+            if campos_dudosos and self.config.use_plan_e:
+                print(f"\n🎯 Paso 9: Plan E - Extracción Individual...")
+                print(f"   📋 Campos a procesar: {campos_dudosos}")
                 
-                # NUEVO: Extraer datos con regex como fallback
-                print(f"\n🔍 Paso 5: Verificando campos con regex...")
-                datos_regex = extraer_datos_con_regex(ocr_text)  # Usar texto OCR original
+                plan_e = PlanEExtractor(self.ollama_service)
+                resultados_plan_e = plan_e.ejecutar(
+                    campos_dudosos=campos_dudosos,
+                    texto_documento=ocr_text,
+                    secciones=secciones
+                )
                 
-                # Mostrar qué encontró regex
-                for campo, valor in datos_regex.items():
-                    if valor is not None:
-                        print(f"   📝 Regex encontró {campo}: {valor}")
+                # Mostrar resultados de Plan E
+                for campo, resultado_e in resultados_plan_e.items():
+                    if resultado_e.exito:
+                        print(f"   ✅ {campo}: {resultado_e.valor} (Plan E, {resultado_e.tiempo_segundos:.1f}s)")
+                    else:
+                        error_msg = resultado_e.error or "No mejorado"
+                        print(f"   ❌ {campo}: {error_msg}")
                 
-                # Combinar datos del LLM con regex (regex como fallback)
-                json_data = merge_extractions(json_data, datos_regex)
+                # Agregar resultados de Plan E al sistema
+                sistema.agregar_plan_e(resultados_plan_e)
                 
-                if validacion_estricta:
-                    result.validacion_estricta = True
-                    result.data = json_data
-                    result.success = True
-                    result.campos_encontrados = 8
-                    result.campos_no_encontrados = []
-                    print(f"\n✅ Validación ESTRICTA exitosa")
-                else:
-                    # Validación flexible
-                    escritura_flexible = validar_json_flexible(json_data)
-                    reporte = escritura_flexible.generar_reporte()
-                    
-                    result.validacion_estricta = False
-                    result.data = reporte["datos_completos"]
-                    result.reporte = reporte
-                    result.success = True
-                    result.campos_encontrados = reporte["resumen"]["campos_encontrados"]
-                    result.campos_no_encontrados = reporte["campos_faltantes"]
-                    
-                    print(f"\n⚠️ Validación FLEXIBLE aplicada")
-                    print(f"   📊 Campos encontrados: {result.campos_encontrados}/8")
-                    if result.campos_no_encontrados:
-                        print(f"   ❌ Faltantes: {', '.join(result.campos_no_encontrados)}")
+                result.plan_e_activado = True
+                result.campos_mejorados_plan_e = [
+                    c for c, r in resultados_plan_e.items() if r.exito
+                ]
+            elif campos_dudosos and not self.config.use_plan_e:
+                print(f"\n⚠️ Paso 9: Plan E deshabilitado (hay {len(campos_dudosos)} campos dudosos)")
             else:
-                result.error = "No se pudo extraer JSON del documento"
-                print(f"\n❌ Error: No se extrajo JSON válido")
+                print(f"\n✅ Paso 9: Plan E no requerido (todos los campos OK)")
+            
+            # =================================================================
+            # PASO 10: CONSOLIDACIÓN FINAL Y EVALUACIÓN (Plan F)
+            # =================================================================
+            print(f"\n📊 Paso 10: Consolidación Final (Plan F)...")
+            
+            resultado_confianza = sistema.consolidar()
+            
+            # =================================================================
+            # PASO 11: CONSTRUIR RESPUESTA FINAL
+            # =================================================================
+            if not resultado_confianza.success:
+                # FALLO: No se pudieron extraer suficientes datos
+                result.success = False
+                result.error = resultado_confianza.error
+                result.data = None
+                result.detalles_fallo = resultado_confianza.detalles_fallo
+                result.calidad_general = resultado_confianza.calidad_general
+                result.campos_encontrados = resultado_confianza.campos_encontrados
+                result.campos_no_encontrados = resultado_confianza.campos_faltantes
+                
+                print(f"\n❌ {resultado_confianza.error}")
+                if resultado_confianza.detalles_fallo:
+                    detalles = resultado_confianza.detalles_fallo
+                    print(f"   Nivel: {detalles.get('nivel', 'N/A')}")
+                    print(f"   Campos críticos: {detalles.get('campos_criticos', 0)}/4")
+                    if detalles.get('posibles_causas'):
+                        print(f"   Posibles causas:")
+                        for causa in detalles['posibles_causas'][:2]:
+                            print(f"      - {causa}")
+            else:
+                # ÉXITO (completo o parcial)
+                result.success = True
+                result.data = resultado_confianza.datos
+                result.confianza = resultado_confianza.confianza
+                result.origen = resultado_confianza.origen
+                result.requiere_revision = resultado_confianza.requiere_revision
+                result.calidad_general = resultado_confianza.calidad_general
+                result.campos_encontrados = resultado_confianza.campos_encontrados
+                result.campos_no_encontrados = resultado_confianza.campos_faltantes
+                
+                # Determinar si pasó validación estricta (8 campos encontrados)
+                result.validacion_estricta = resultado_confianza.campos_encontrados >= 8
+                
+                # Mostrar resumen
+                if resultado_confianza.advertencia:
+                    print(f"\n⚠️ {resultado_confianza.advertencia}")
+                else:
+                    print(f"\n✅ Extracción exitosa")
+                
+                print(f"   📊 Calidad: {resultado_confianza.calidad_general}%")
+                print(f"   📊 Campos encontrados: {resultado_confianza.campos_encontrados}/8")
+                
+                # Mostrar confianza por campo
+                confianza_alta = sum(1 for c in resultado_confianza.confianza.values() if c == "alta")
+                confianza_media = sum(1 for c in resultado_confianza.confianza.values() if c == "media")
+                confianza_baja = sum(1 for c in resultado_confianza.confianza.values() if c == "baja")
+                
+                print(f"   ✅ Alta confianza: {confianza_alta}")
+                print(f"   ⚠️ Media confianza: {confianza_media}")
+                print(f"   ❌ Baja confianza: {confianza_baja}")
+                
+                if resultado_confianza.plan_e_activado:
+                    print(f"   🎯 Plan E mejoró: {resultado_confianza.campos_mejorados_plan_e}")
+                
+                if resultado_confianza.requiere_revision:
+                    print(f"   🔍 Requieren revisión: {', '.join(resultado_confianza.requiere_revision)}")
         
         except FileNotFoundError as e:
             result.error = f"Archivo no encontrado: {e}"
@@ -470,6 +696,18 @@ class EscrituraExtractor:
                 
                 json_data = processed.get('json_data')
                 
+                # 🔍 DEBUG LOG 1: Valor después de process_deepseek_response
+                import json as json_module
+                print(f"\n      📋 DEBUG - json_data ANTES de limpiar:")
+                if json_data:
+                    try:
+                        debug_str = json_module.dumps(json_data, indent=2, ensure_ascii=False)
+                        print(f"         {debug_str[:2000]}{'...' if len(debug_str) > 2000 else ''}")
+                    except:
+                        print(f"         {str(json_data)[:2000]}")
+                else:
+                    print(f"         None")
+                
                 if not json_data:
                     print(f"      ⚠️ No se extrajo JSON de la respuesta")
                     last_error = "No se pudo parsear JSON de la respuesta"
@@ -478,13 +716,16 @@ class EscrituraExtractor:
                 # ============================================================
                 # LIMPIEZA DE CAMPOS EXTRA (CRÍTICO)
                 # ============================================================
-                # El LLM a veces agrega campos no solicitados como:
-                # - "documento", "inmueble", "firmas"
-                # - "representante_legal" (debe estar dentro de representante)
-                # Esta función los elimina y corrige la estructura.
-                # ============================================================
                 print(f"      🧹 Limpiando campos extra del JSON...")
                 json_data = limpiar_json_extra(json_data)
+                
+                # 🔍 DEBUG LOG 2: Valor después de limpiar_json_extra
+                print(f"\n      📋 DEBUG - json_data DESPUÉS de limpiar:")
+                try:
+                    debug_str = json_module.dumps(json_data, indent=2, ensure_ascii=False)
+                    print(f"         {debug_str[:2000]}{'...' if len(debug_str) > 2000 else ''}")
+                except:
+                    print(f"         {str(json_data)[:2000]}")
                 
                 # Guardar para siguiente intento
                 last_json = json_data
@@ -508,6 +749,10 @@ class EscrituraExtractor:
                 except ValidationError as e:
                     last_error = str(e)
                     print(f"      ⚠️ Validación estricta falló")
+                    
+                    # 🔍 DEBUG LOG 3: Error de validación estricta completo
+                    print(f"\n      ❌ DEBUG - Error de validación estricta:")
+                    print(f"         {e}")
                     
                     # Mostrar análisis del JSON
                     analisis = analizar_json_parcial(json_data, tipo_titular)
@@ -585,7 +830,7 @@ class EscrituraExtractor:
         Imprime el resumen final de la extracción.
         """
         print(f"\n{'='*60}")
-        print(f"📊 RESULTADO FINAL")
+        print(f"📊 RESULTADO FINAL - PLAN Z")
         print(f"{'='*60}")
         
         if result.success:
@@ -593,20 +838,38 @@ class EscrituraExtractor:
                 print(f"✅ EXTRACCIÓN EXITOSA (validación estricta)")
             else:
                 print(f"⚠️ EXTRACCIÓN PARCIAL (validación flexible)")
-                print(f"   Campos encontrados: {result.campos_encontrados}/8")
-                if result.campos_no_encontrados:
-                    print(f"   Campos faltantes: {', '.join(result.campos_no_encontrados)}")
+            
+            print(f"   Calidad: {result.calidad_general}%")
+            print(f"   Campos encontrados: {result.campos_encontrados}/8")
+            
+            if result.campos_no_encontrados:
+                print(f"   Campos faltantes: {', '.join(result.campos_no_encontrados)}")
+            
+            if result.plan_e_activado:
+                print(f"\n🎯 Plan E:")
+                print(f"   Activado: Sí")
+                print(f"   Campos mejorados: {result.campos_mejorados_plan_e}")
+            
+            if result.requiere_revision:
+                print(f"\n🔍 Campos que requieren revisión:")
+                for campo in result.requiere_revision:
+                    print(f"   - {campo}")
         else:
             print(f"❌ EXTRACCIÓN FALLIDA")
             print(f"   Error: {result.error}")
+            if result.detalles_fallo:
+                print(f"   Nivel: {result.detalles_fallo.get('nivel', 'N/A')}")
         
         if result.tipo_detectado:
             print(f"\n📋 Clasificación:")
             print(f"   Tipo: {result.tipo_detectado}")
             print(f"   Método: {result.metodo_clasificacion}")
         
+        if result.secciones_detectadas:
+            print(f"\n📄 Secciones detectadas: {result.secciones_detectadas}")
+        
         print(f"\n⏱️ Tiempo total: {result.processing_time:.2f}s")
-        print(f"🔄 Intentos: {result.intentos_realizados}")
+        print(f"🔄 Intentos LLM: {result.intentos_realizados}")
         print(f"🤖 Modelo: {result.model_used}")
         print(f"{'='*60}\n")
     
@@ -644,6 +907,8 @@ def extract_escritura(pdf_path: str, **kwargs) -> ExtractionResult:
         >>> result = extract_escritura("documento.pdf")
         >>> if result.success:
         ...     print(result.data)
+        ...     print(f"Calidad: {result.calidad_general}%")
+        ...     print(f"Confianza: {result.confianza}")
     """
     config = ExtractionConfig(**kwargs)
     extractor = EscrituraExtractor(config=config)
@@ -657,7 +922,7 @@ def extract_escritura(pdf_path: str, **kwargs) -> ExtractionResult:
 if __name__ == "__main__":
     print("=" * 60)
     print("EXTRACTOR DE ESCRITURAS PÚBLICAS")
-    print("Sistema Híbrido (Plan A + C)")
+    print("Sistema Plan Z (ABDF + E)")
     print("=" * 60)
     
     # Crear extractor
@@ -676,5 +941,8 @@ if __name__ == "__main__":
     print("   ")
     print("   if result.success:")
     print("       print(result.data)")
-    print("       print(f'Tipo: {result.tipo_detectado}')")
-    print("       print(f'Campos: {result.campos_encontrados}/8')")
+    print("       print(f'Calidad: {result.calidad_general}%')")
+    print("       print(f'Confianza: {result.confianza}')")
+    print("       print(f'Plan E activado: {result.plan_e_activado}')")
+    print("       if result.requiere_revision:")
+    print("           print(f'Revisar: {result.requiere_revision}')")

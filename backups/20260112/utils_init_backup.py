@@ -20,15 +20,6 @@ from .text_processing import (
     extraer_fecha_documento,
     extraer_datos_con_regex,
     merge_extractions,
-    #Nuevas funciones del plan Z
-    extraer_numero_notaria,
-    extraer_nombre_notario,
-    extraer_rfc_todos,
-    extraer_curp_todos,
-    extraer_municipio,
-    extraer_estado,
-    extraer_todos_regex,
-    validar_dato_en_texto,
 )
 
 from .prompt_builder import (

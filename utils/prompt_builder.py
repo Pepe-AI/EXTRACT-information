@@ -58,6 +58,315 @@ CAMPOS_ADQUIRIENTE_PERMITIDOS = {
 
 
 # =============================================================================
+# FUNCIONES DE RECUPERACIÓN Y NORMALIZACIÓN
+# =============================================================================
+
+def _recuperar_datos_estructura_alternativa(json_data: dict) -> dict:
+    """
+    Recupera datos de estructuras alternativas que el LLM puede generar.
+    
+    PROBLEMA QUE RESUELVE:
+    ======================
+    El LLM a veces genera estructuras como:
+    
+        {
+            "Documento": {
+                "Partes": {
+                    "Vendedor": "Instituto Nacional...",
+                    "Comprador": "ANGELBERTA PÉREZ SOTO"
+                },
+                "Fecha": "05/05/2023",
+                "Escritura": {"Numero": "2307"}
+            }
+        }
+    
+    En lugar de la estructura esperada con "titulares" y "adquirientes".
+    
+    CÓMO FUNCIONA:
+    ==============
+    1. Detecta si existe el campo "Documento" (estructura alternativa)
+    2. Extrae los datos anidados y los mapea a la estructura esperada
+    3. También busca campos alternativos en raíz ("vendedor", "comprador")
+    
+    Args:
+        json_data: JSON original del LLM
+        
+    Returns:
+        JSON con datos recuperados en la estructura correcta
+        
+    Ejemplo:
+        >>> entrada = {"Documento": {"Partes": {"Vendedor": "INSUS"}}}
+        >>> salida = _recuperar_datos_estructura_alternativa(entrada)
+        >>> print(salida.get("titulares"))
+        [{"nombre": "INSUS", "actua_por": "NO SE ENCONTRÓ DATO", "representante": None}]
+    """
+    
+    # Si ya tiene la estructura correcta, retornar sin cambios
+    if "titulares" in json_data and json_data["titulares"]:
+        return json_data
+    
+    resultado = dict(json_data)  # Copia para no modificar original
+    
+    # =========================================================================
+    # ESTRATEGIA 1: Buscar estructura "Documento"
+    # =========================================================================
+    
+    documento = json_data.get("Documento") or json_data.get("documento")
+    
+    if documento and isinstance(documento, dict):
+        print("   🔄 Recuperando datos de estructura 'Documento'...")
+        
+        # Extraer "Partes" (Vendedor/Comprador)
+        partes = documento.get("Partes") or documento.get("partes") or {}
+        
+        # -----------------------------------------------------------------
+        # Recuperar VENDEDOR → titulares
+        # -----------------------------------------------------------------
+        vendedor = (
+            partes.get("Vendedor") or 
+            partes.get("vendedor") or
+            documento.get("Vendedor") or
+            documento.get("vendedor")
+        )
+        
+        if vendedor and not resultado.get("titulares"):
+            if isinstance(vendedor, str):
+                resultado["titulares"] = [{
+                    "nombre": vendedor,
+                    "actua_por": NO_ENCONTRADO,
+                    "representante": None
+                }]
+            elif isinstance(vendedor, dict):
+                nombre_vendedor = (
+                    vendedor.get("nombre") or 
+                    vendedor.get("Nombre") or
+                    vendedor.get("razon_social") or
+                    str(vendedor)
+                )
+                resultado["titulares"] = [{
+                    "nombre": nombre_vendedor,
+                    "actua_por": vendedor.get("actua_por", NO_ENCONTRADO),
+                    "representante": vendedor.get("representante")
+                }]
+            
+            print(f"      ✅ Recuperado vendedor: {resultado['titulares'][0]['nombre'][:50]}...")
+        
+        # -----------------------------------------------------------------
+        # Recuperar COMPRADOR → adquirientes
+        # -----------------------------------------------------------------
+        comprador = (
+            partes.get("Comprador") or 
+            partes.get("comprador") or
+            documento.get("Comprador") or
+            documento.get("comprador")
+        )
+        
+        if comprador and not resultado.get("adquirientes"):
+            if isinstance(comprador, str):
+                resultado["adquirientes"] = [{
+                    "nombre": comprador,
+                    "estado_civil": NO_ENCONTRADO,
+                    "tipo_sociedad": None,
+                    "edad": None,
+                    "rfc": False,
+                    "curp": False
+                }]
+            elif isinstance(comprador, dict):
+                nombre_comprador = (
+                    comprador.get("nombre") or 
+                    comprador.get("Nombre") or
+                    str(comprador)
+                )
+                resultado["adquirientes"] = [{
+                    "nombre": nombre_comprador,
+                    "estado_civil": comprador.get("estado_civil", NO_ENCONTRADO),
+                    "tipo_sociedad": comprador.get("tipo_sociedad"),
+                    "edad": comprador.get("edad"),
+                    "rfc": comprador.get("rfc", False),
+                    "curp": comprador.get("curp", False)
+                }]
+            
+            print(f"      ✅ Recuperado comprador: {resultado['adquirientes'][0]['nombre'][:50]}...")
+        
+        # -----------------------------------------------------------------
+        # Recuperar otros campos del documento
+        # -----------------------------------------------------------------
+        
+        # Fecha
+        if not resultado.get("fecha_documento") or resultado.get("fecha_documento") == NO_ENCONTRADO:
+            fecha = (
+                documento.get("Fecha") or 
+                documento.get("fecha") or
+                documento.get("fecha_documento")
+            )
+            if fecha:
+                resultado["fecha_documento"] = fecha
+                print(f"      ✅ Recuperada fecha: {fecha}")
+        
+        # Escritura
+        escritura_obj = documento.get("Escritura") or documento.get("escritura") or {}
+        if isinstance(escritura_obj, dict):
+            numero_esc = escritura_obj.get("Numero") or escritura_obj.get("numero")
+            if numero_esc and not resultado.get("numero_escritura"):
+                try:
+                    resultado["numero_escritura"] = int(str(numero_esc).replace(",", ""))
+                    print(f"      ✅ Recuperado numero_escritura: {resultado['numero_escritura']}")
+                except ValueError:
+                    pass
+        
+        # Monto
+        monto = (
+            documento.get("Consideraciones") or
+            documento.get("Precio") or
+            documento.get("precio") or
+            documento.get("Monto") or
+            documento.get("monto") or
+            documento.get("monto_operacion")
+        )
+        if monto and (not resultado.get("monto_operacion") or resultado.get("monto_operacion") == NO_ENCONTRADO):
+            if isinstance(monto, str):
+                resultado["monto_operacion"] = monto
+            elif isinstance(monto, (int, float)):
+                resultado["monto_operacion"] = f"${monto:,.2f}"
+            print(f"      ✅ Recuperado monto: {resultado.get('monto_operacion')}")
+    
+    # =========================================================================
+    # ESTRATEGIA 2: Buscar campos alternativos en raíz
+    # =========================================================================
+    
+    MAPEO_ALTERNATIVOS = {
+        # Titulares
+        "vendedor": "titulares",
+        "vendedores": "titulares",
+        "transmitente": "titulares",
+        "transmitentes": "titulares",
+        "enajenante": "titulares",
+        "enajenantes": "titulares",
+        "propietario": "titulares",
+        "propietarios": "titulares",
+        
+        # Adquirientes
+        "comprador": "adquirientes",
+        "compradores": "adquirientes",
+        "adquirente": "adquirientes",
+        "adquirentes": "adquirientes",
+        "beneficiario": "adquirientes",
+        "beneficiarios": "adquirientes",
+    }
+    
+    for campo_alt, campo_correcto in MAPEO_ALTERNATIVOS.items():
+        if campo_alt in json_data and not resultado.get(campo_correcto):
+            valor = json_data[campo_alt]
+            
+            if isinstance(valor, str):
+                if campo_correcto == "titulares":
+                    resultado[campo_correcto] = [{
+                        "nombre": valor,
+                        "actua_por": NO_ENCONTRADO,
+                        "representante": None
+                    }]
+                else:
+                    resultado[campo_correcto] = [{
+                        "nombre": valor,
+                        "estado_civil": NO_ENCONTRADO,
+                        "tipo_sociedad": None,
+                        "edad": None,
+                        "rfc": False,
+                        "curp": False
+                    }]
+            elif isinstance(valor, list):
+                resultado[campo_correcto] = valor
+            elif isinstance(valor, dict):
+                resultado[campo_correcto] = [valor]
+            
+            print(f"   🔄 Mapeado '{campo_alt}' → '{campo_correcto}'")
+    
+    return resultado
+
+
+def _normalizar_valores_null(json_data: dict) -> dict:
+    """
+    Convierte valores `null` a valores válidos según el tipo esperado.
+    
+    PROBLEMA QUE RESUELVE:
+    ======================
+    El LLM genera JSON con valores `null` donde Pydantic espera strings:
+    
+        {
+            "adquirientes": [{
+                "estado_civil": null,    ← Error: espera str
+                "rfc": null              ← Debería ser False
+            }]
+        }
+    
+    Error de Pydantic:
+    "Input should be a valid string [type=string_type, input_value=None]"
+    
+    CÓMO FUNCIONA:
+    ==============
+    1. Recorre recursivamente el JSON (porque hay estructuras anidadas)
+    2. Para campos string obligatorios: null → "NO SE ENCONTRÓ DATO"
+    3. Para campos boolean (rfc, curp, bis): null → False
+    
+    Args:
+        json_data: JSON con posibles valores null
+        
+    Returns:
+        JSON con valores normalizados
+    """
+    
+    if not json_data:
+        return json_data
+    
+    # Campos que DEBEN ser string (no pueden ser null)
+    CAMPOS_STRING_OBLIGATORIOS = {
+        "fecha_documento",
+        "tipo_titular", 
+        "monto_operacion",
+        "tipo_moneda",
+        "nombre",
+        "actua_por",
+        "en_calidad",
+        "fecha_poder",
+        "estado_civil",
+        "municipio",
+    }
+    
+    # Campos que deben ser boolean (null → False)
+    CAMPOS_BOOLEAN = {"rfc", "curp", "bis"}
+    
+    def normalizar_recursivo(obj, campo_padre=None):
+        """Normaliza valores null de forma recursiva."""
+        
+        if obj is None:
+            return obj
+        
+        if isinstance(obj, dict):
+            resultado_dict = {}
+            for key, value in obj.items():
+                if value is None:
+                    if key in CAMPOS_STRING_OBLIGATORIOS:
+                        resultado_dict[key] = NO_ENCONTRADO
+                    elif key in CAMPOS_BOOLEAN:
+                        resultado_dict[key] = False
+                    else:
+                        resultado_dict[key] = None
+                elif isinstance(value, (dict, list)):
+                    resultado_dict[key] = normalizar_recursivo(value, key)
+                else:
+                    resultado_dict[key] = value
+            return resultado_dict
+        
+        elif isinstance(obj, list):
+            return [normalizar_recursivo(item, campo_padre) for item in obj]
+        
+        else:
+            return obj
+    
+    return normalizar_recursivo(json_data)
+
+
+# =============================================================================
 # EJEMPLOS JSON EXACTOS
 # =============================================================================
 
@@ -881,6 +1190,8 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
     
     PROCESO:
     ========
+    0. NUEVO: Recuperar datos de estructuras alternativas (Documento, vendedor, etc.)
+    0b. NUEVO: Normalizar valores null a valores válidos
     1. Filtra solo campos permitidos en raíz
     2. NUEVO: Normaliza notario a array de objetos
     3. Limpia cada titular (solo 3 campos)
@@ -909,6 +1220,20 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
     
     if not json_data:
         return {}
+    
+    # =========================================================================
+    # PASO 0: Recuperar datos de estructuras alternativas del LLM
+    # =========================================================================
+    # Si el LLM generó estructuras como "Documento", "vendedor", etc.
+    # las convertimos a la estructura esperada antes de limpiar
+    json_data = _recuperar_datos_estructura_alternativa(json_data)
+    
+    # =========================================================================
+    # PASO 0b: Normalizar valores null a valores válidos
+    # =========================================================================
+    # Convierte null → "NO SE ENCONTRÓ DATO" para campos string
+    # Convierte null → False para campos boolean (rfc, curp, bis)
+    json_data = _normalizar_valores_null(json_data)
     
     resultado = {}
     

@@ -1,6 +1,13 @@
 """
 utils/text_processing.py - Utilidades para procesamiento de texto OCR
 
+VERSIÓN: 2.0 - Con correcciones Plan Z
+
+FIXES APLICADOS:
+================
+- FIX #1: extraer_numero_escritura() - Busca primero en encabezado, excluye sellos de catastro
+- FIX #2: extraer_estado() - Busca en contexto específico, no solo primera mención
+
 Funciones principales:
 - clean_ocr_text(): Limpia texto extraído por OCR
 - truncate_text(): Trunca texto largo para el contexto del LLM
@@ -8,11 +15,12 @@ Funciones principales:
 - extract_think_block(): Extrae bloque <think> de DeepSeek R1
 - extract_json_from_response(): Extrae JSON de la respuesta del LLM
 - process_deepseek_response(): Procesa respuesta completa de DeepSeek
+- extraer_todos_regex(): Extrae todos los campos usando regex (Plan A)
 """
 
 import re
 import json
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from collections import Counter
 
 
@@ -201,6 +209,20 @@ def format_for_prompt(text: str, max_tokens: int = 8000) -> str:
     return formatted
 
 
+def estimate_tokens(text: str, chars_per_token: float = 4.0) -> int:
+    """
+    Estima el número de tokens en un texto.
+    
+    Args:
+        text: Texto a estimar
+        chars_per_token: Caracteres por token (default: 4.0)
+        
+    Returns:
+        Número estimado de tokens
+    """
+    return int(len(text) / chars_per_token)
+
+
 # =============================================================================
 # PROCESAMIENTO DE RESPUESTAS DE DEEPSEEK R1
 # =============================================================================
@@ -325,56 +347,6 @@ def process_deepseek_response(response_text: str) -> Dict[str, Any]:
 
 
 # =============================================================================
-# CÓDIGO DE PRUEBA
-# =============================================================================
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("PRUEBA DE PROCESAMIENTO DE TEXTO")
-    print("=" * 60)
-    
-    # Prueba de limpieza
-    texto_sucio = """
-COTEJADO
-ESTADOS UNIDOS MEXICANOS
-NOTARIA 45
-1/5
-
-ESCRITURA PÚBLICA NÚMERO 3125
-
-En la Ciudad de México, ante mí, Licenciado Roberto Martínez,
-comparecen como VENDEDOR: Juan Pérez López.
-
-COTEJADO
-2/5
-"""
-    
-    print("\n📄 Texto original:")
-    print(texto_sucio[:200] + "...")
-    
-    texto_limpio = clean_ocr_text(texto_sucio)
-    print("\n🧹 Texto limpio:")
-    print(texto_limpio)
-    
-    # Prueba de extracción de JSON
-    print("\n" + "=" * 60)
-    respuesta_con_think = """
-<think>
-Analizando el documento...
-El número de escritura es 3125.
-</think>
-
-```json
-{"numero_escritura": 3125, "notario": "Roberto Martínez"}
-```
-"""
-    
-    resultado = process_deepseek_response(respuesta_con_think)
-    print(f"\n✅ JSON extraído: {resultado['json_data']}")
-    print(f"💭 Tiene thinking: {resultado['thinking'] is not None}")
-
-
-# =============================================================================
 # EXTRACCIÓN DE DATOS POR REGEX (RESPALDO/FALLBACK)
 # =============================================================================
 
@@ -408,8 +380,6 @@ def extraer_monto_operacion(texto: str) -> Optional[str]:
     """
     
     # Patrón base para montos: captura números con formato mexicano
-    # Soporta: $1,500,000.00 | $1500000.00 | $1,500,000 | 1,500,000.00
-    # IMPORTANTE: El orden importa - primero probar números largos sin comas
     PATRON_MONTO = r'\$?\s*(\d{4,}(?:\.\d{2})?|\d{1,3}(?:[,]\d{3})+(?:\.\d{2})?|\d{1,3}(?:\.\d{2})?)'
     
     # Lista de patrones ordenados por especificidad (más específico primero)
@@ -423,7 +393,7 @@ def extraer_monto_operacion(texto: str) -> Optional[str]:
         # 3. "por la suma de $X,XXX.XX"
         (r'(?:por\s+)?(?:la\s+)?suma\s+de\s+' + PATRON_MONTO, 1),
         
-        # 4. "monto de/total/es $X,XXX.XX" - MEJORADO
+        # 4. "monto de/total/es $X,XXX.XX"
         (r'monto\s+(?:de\s+)?(?:la\s+)?(?:operaci[oó]n\s+)?(?:es\s+)?(?:de\s+)?' + PATRON_MONTO, 1),
         
         # 5. "valor de $X,XXX.XX"
@@ -436,7 +406,7 @@ def extraer_monto_operacion(texto: str) -> Optional[str]:
         (r'M\.?\s*N\.?\s*:?\s*' + PATRON_MONTO, 1),
         (PATRON_MONTO + r'\s*M\.?\s*N\.?', 0),
         
-        # 8. "precio: $X,XXX.XX" o "precio $X,XXX.XX" (formato simple) - MEJORADO
+        # 8. "precio: $X,XXX.XX" o "precio $X,XXX.XX" (formato simple)
         (r'precio\s*:?\s*' + PATRON_MONTO, 1),
         
         # 9. "importe de $X,XXX.XX"
@@ -472,9 +442,8 @@ def extraer_monto_operacion(texto: str) -> Optional[str]:
                     try:
                         monto_num = float(monto_limpio)
                         
-                        # Filtrar montos muy pequeños (probablemente no son el precio)
-                        # y muy grandes (probablemente errores de OCR)
-                        if 1000 <= monto_num <= 500000000:  # Entre $1,000 y $500M
+                        # Filtrar montos muy pequeños y muy grandes
+                        if 1000 <= monto_num <= 500000000:
                             mejores_montos.append((monto_num, monto_str, match.start()))
                     except ValueError:
                         continue
@@ -482,66 +451,209 @@ def extraer_monto_operacion(texto: str) -> Optional[str]:
                 continue
     
     if mejores_montos:
-        # Ordenar por:
-        # 1. Montos más "redondos" (típicos de precios) primero
-        # 2. Posición en el documento (primeros párrafos suelen tener el precio)
+        # Ordenar por montos más "redondos" y posición en documento
         def score_monto(item):
             monto, _, pos = item
-            # Penalizar posiciones muy tardías en el documento
             pos_score = pos / 1000
-            # Bonificar montos redondos (múltiplos de 1000)
             redondez = 0 if monto % 1000 == 0 else (0.5 if monto % 100 == 0 else 1)
             return redondez + pos_score * 0.1
         
         mejores_montos.sort(key=score_monto)
         mejor_monto = mejores_montos[0][0]
         
-        # Formatear el monto como moneda mexicana
         return f"${mejor_monto:,.2f}"
     
     return None
 
 
+# =============================================================================
+# FIX #1: extraer_numero_escritura CORREGIDO
+# =============================================================================
+
 def extraer_numero_escritura(texto: str) -> Optional[int]:
     """
     Extrae el número de escritura del documento.
     
-    PATRONES QUE BUSCA:
-    ===================
-    - "ESCRITURA NÚMERO 18,226"
-    - "ESCRITURA PÚBLICA NÚMERO 3125"
-    - "Escritura número 18226"
-    - "ESCRITURA No. 18,226"
-    - Números en palabras: "DIECIOCHO MIL DOSCIENTOS VEINTISEIS"
+    FIX #1 APLICADO:
+    ================
+    - Busca PRIMERO en el encabezado (primeros 1000 chars)
+    - Incluye patrón para "Instrumento Público Número"
+    - Excluye sellos de catastro ("ESCRITURA NO X SE TRAMITÓ")
     
+    PROBLEMA ORIGINAL:
+    ==================
+    El documento tenía:
+      - INICIO: "Instrumento Público Número 2307" ← CORRECTO
+      - FINAL:  "ESCRITURA NO 2,397" ← Sello de catastro (INCORRECTO)
+    
+    La función original encontraba 2397 porque no priorizaba el encabezado
+    y no excluía contextos de sellos de catastro.
+    
+    PATRONES QUE BUSCA (en orden de prioridad):
+    ===========================================
+    1. "Instrumento Público Número 2307" ← MÁS CONFIABLE
+    2. "ESCRITURA PÚBLICA NÚMERO 18,226"
+    3. "ESCRITURA NÚMERO 3125"
+    4. "NÚMERO DE ESCRITURA: 12345"
+    5. "INSTRUMENTO NÚMERO 12345"
+    
+    PATRONES QUE EXCLUYE:
+    =====================
+    - "ESCRITURA NO 2,397 SE TRAMITÓ" (sello de catastro)
+    - "PRESENTE ESCRITURA NO X CONFORME" (referencia)
+    
+    Args:
+        texto: Texto del documento OCR
+        
     Returns:
         int: Número de escritura, o None si no se encuentra
+        
+    Ejemplo:
+        >>> texto = "Instrumento Público Número 2307 dos mil trescientos siete"
+        >>> extraer_numero_escritura(texto)
+        2307
     """
     
+    # =========================================================================
+    # Patrón base para números de escritura
+    # =========================================================================
+    # IMPORTANTE: El orden de las alternativas importa en regex.
+    # Primero intentamos capturar números de 4-6 dígitos SIN separador,
+    # luego números CON separadores de miles.
+    # Si lo hacemos al revés, \d{1,3} capturaría solo los primeros 3 dígitos.
+    
+    PATRON_NUMERO = r'(\d{4,6}|\d{1,3}(?:[,]\d{3})+)'
+    
+    # =========================================================================
+    # Patrones de búsqueda ordenados por especificidad
+    # =========================================================================
+    
     patrones = [
-        # Patrón 1: ESCRITURA [PÚBLICA] [NÚMERO/No./NUM] seguido de número
-        r'ESCRITURA\s+(?:P[UÚ]BLICA\s+)?(?:N[UÚ]MERO|No\.?|NUM\.?|#)\s*[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
+        # PATRÓN 1: "Instrumento Público Número X" (MÁS ESPECÍFICO)
+        # Este formato aparece al inicio de escrituras notariales mexicanas.
+        (
+            "instrumento_publico",
+            r'INSTRUMENTO\s+P[UÚ]BLICO\s+N[UÚ]MERO\s*' + PATRON_NUMERO,
+            1  # Prioridad más alta
+        ),
         
-        # Patrón 2: ESCRITURA seguida directamente de número
-        r'ESCRITURA\s+(\d{1,3}(?:[,.\s]\d{3})*)',
+        # PATRÓN 2: "Escritura Pública Número X"
+        (
+            "escritura_publica_numero",
+            r'ESCRITURA\s+P[UÚ]BLICA\s+(?:N[UÚ]MERO|No\.?|#)\s*[:\s]*' + PATRON_NUMERO,
+            2
+        ),
         
-        # Patrón 3: N[UÚ]MERO DE ESCRITURA
-        r'N[UÚ]MERO\s+DE\s+ESCRITURA[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
+        # PATRÓN 3: "Escritura Número X" (sin "Pública")
+        (
+            "escritura_numero",
+            r'ESCRITURA\s+(?:N[UÚ]MERO|No\.?|NUM\.?|#)\s*[:\s]*' + PATRON_NUMERO,
+            3
+        ),
         
-        # Patrón 4: INSTRUMENTO NÚMERO (algunos documentos usan esto)
-        r'INSTRUMENTO\s+(?:N[UÚ]MERO|No\.?)\s*[:\s]*(\d{1,3}(?:[,.\s]\d{3})*)',
+        # PATRÓN 4: "Número de Escritura: X"
+        (
+            "numero_de_escritura",
+            r'N[UÚ]MERO\s+DE\s+ESCRITURA[:\s]*' + PATRON_NUMERO,
+            4
+        ),
+        
+        # PATRÓN 5: "Instrumento Número X" (sin "Público")
+        (
+            "instrumento_numero",
+            r'INSTRUMENTO\s+(?:N[UÚ]MERO|No\.?)\s*[:\s]*' + PATRON_NUMERO,
+            5
+        ),
     ]
     
-    for patron in patrones:
-        match = re.search(patron, texto, re.IGNORECASE)
-        if match:
-            numero_str = re.sub(r'[,.\s]', '', match.group(1))
-            try:
-                numero = int(numero_str)
-                if 1 <= numero <= 999999:  # Rango válido
-                    return numero
-            except ValueError:
+    # =========================================================================
+    # Patrones de EXCLUSIÓN (contextos a ignorar)
+    # =========================================================================
+    # Estos patrones identifican números que NO son el número de escritura,
+    # como los sellos de catastro que aparecen al final del documento.
+    
+    patrones_exclusion = [
+        r'ESCRITURA\s+NO\.?\s*[\d,.\s]+\s*SE\s+',       # "ESCRITURA NO 2,397 SE TRAMITÓ"
+        r'ESCRITURA\s+NO\.?\s*[\d,.\s]+\s*CONFORME',    # "ESCRITURA NO 2,397 CONFORME"
+        r'ESCRITURA\s+NO\.?\s*[\d,.\s]+\s*TRAMIT',      # "ESCRITURA NO 2,397 TRAMIT..."
+        r'PRESENTE\s+ESCRITURA\s+NO\.?\s*[\d,.\s]+',    # "PRESENTE ESCRITURA NO 2,397"
+    ]
+    
+    # =========================================================================
+    # Funciones auxiliares
+    # =========================================================================
+    
+    def limpiar_numero(numero_str: str) -> Optional[int]:
+        """Convierte string de número a int, manejando formatos mexicanos."""
+        limpio = re.sub(r'[,.\s]', '', numero_str)
+        try:
+            numero = int(limpio)
+            if 1 <= numero <= 999999:  # Rango válido para escrituras
+                return numero
+            return None
+        except ValueError:
+            return None
+    
+    def esta_en_contexto_excluido(texto: str, posicion: int, ventana: int = 100) -> bool:
+        """Verifica si el match está en un contexto de sello de catastro."""
+        inicio = max(0, posicion - ventana)
+        fin = min(len(texto), posicion + ventana)
+        contexto = texto[inicio:fin].upper()
+        
+        for patron in patrones_exclusion:
+            if re.search(patron, contexto, re.IGNORECASE):
+                return True
+        return False
+    
+    # =========================================================================
+    # ESTRATEGIA PRINCIPAL: Buscar en ENCABEZADO primero
+    # =========================================================================
+    
+    CHARS_ENCABEZADO = 1000
+    texto_upper = texto.upper()
+    encabezado = texto_upper[:CHARS_ENCABEZADO]
+    
+    matches_encontrados = []
+    
+    # Buscar en el encabezado con todos los patrones
+    for nombre_patron, regex, prioridad in patrones:
+        for match in re.finditer(regex, encabezado, re.IGNORECASE):
+            posicion = match.start()
+            
+            # Verificar que no esté en contexto excluido
+            if esta_en_contexto_excluido(texto_upper, posicion):
                 continue
+            
+            numero = limpiar_numero(match.group(1))
+            if numero:
+                matches_encontrados.append((numero, prioridad, posicion, nombre_patron))
+    
+    # =========================================================================
+    # FALLBACK: Si no encontró en encabezado, buscar en todo el documento
+    # =========================================================================
+    
+    if not matches_encontrados:
+        for nombre_patron, regex, prioridad in patrones:
+            for match in re.finditer(regex, texto_upper, re.IGNORECASE):
+                posicion = match.start()
+                
+                if esta_en_contexto_excluido(texto_upper, posicion):
+                    continue
+                
+                numero = limpiar_numero(match.group(1))
+                if numero:
+                    # Penalizar posiciones tardías en búsqueda completa
+                    prioridad_ajustada = prioridad + (posicion / 10000)
+                    matches_encontrados.append((numero, prioridad_ajustada, posicion, nombre_patron))
+    
+    # =========================================================================
+    # Seleccionar el mejor match
+    # =========================================================================
+    
+    if matches_encontrados:
+        # Ordenar por prioridad (menor = mejor), luego por posición
+        matches_encontrados.sort(key=lambda x: (x[1], x[2]))
+        return matches_encontrados[0][0]
     
     return None
 
@@ -562,15 +674,13 @@ def extraer_fecha_documento(texto: str) -> Optional[str]:
     """
     
     MESES = r'(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)'
-    
-    # Patrones para años en palabras
     ANIO_PALABRAS = r'(?:dos\s+mil\s+(?:veinti(?:uno|dos|tres|cuatro|cinco|seis)|dieci(?:siete|ocho|nueve)|veinte)|\d{4})'
     
     patrones = [
-        # Patrón legal notarial con año en números: "A los (22) veintidós días del mes de marzo del año 2024"
+        # Patrón legal notarial con año en números
         rf'(?:A\s+los\s+)?(?:\(\d+\)\s+)?(\w+)\s+d[ií]as?\s+del\s+mes\s+de\s+({MESES})\s+(?:del\s+)?a[ñn]o\s+(\d{{4}})',
         
-        # Patrón legal notarial con año en palabras: "del año dos mil veinticuatro"
+        # Patrón legal notarial con año en palabras
         rf'(?:A\s+los\s+)?(?:\(\d+\)\s+)?(\w+)\s+d[ií]as?\s+del\s+mes\s+de\s+({MESES})\s+(?:del\s+)?a[ñn]o\s+({ANIO_PALABRAS})',
         
         # Patrón simple: "15 de mayo de 2024"
@@ -579,11 +689,10 @@ def extraer_fecha_documento(texto: str) -> Optional[str]:
         # Patrón con "a": "a 15 de mayo de 2024"
         rf'[aA]\s+(\d{{1,2}})\s+de\s+({MESES})\s+(?:de\s+|del\s+)?(\d{{4}})',
         
-        # Patrón con año en palabras: "15 de mayo de dos mil veinticuatro"
+        # Patrón con año en palabras
         rf'(\d{{1,2}})\s+de\s+({MESES})\s+(?:de\s+|del\s+)?({ANIO_PALABRAS})',
     ]
     
-    # Diccionario para convertir años en palabras a números
     ANIOS_PALABRAS = {
         'dos mil veintiuno': '2021',
         'dos mil veintidos': '2022',
@@ -623,17 +732,13 @@ def extraer_datos_con_regex(texto: str) -> Dict[str, Any]:
     Extrae datos críticos del documento usando expresiones regulares.
     
     Esta función sirve como RESPALDO cuando el LLM falla en extraer
-    datos específicos. Es especialmente útil para campos numéricos
-    como monto_operacion y numero_escritura.
+    datos específicos.
     
     Args:
         texto: Texto completo del documento OCR
         
     Returns:
-        Dict con los datos extraídos:
-        - monto_operacion: str o None
-        - numero_escritura: int o None
-        - fecha_documento: str o None
+        Dict con los datos extraídos
     """
     
     return {
@@ -682,3 +787,458 @@ def merge_extractions(llm_data: Dict, regex_data: Dict) -> Dict[str, Any]:
                 print(f"   📝 {campo}: Usando valor de regex ({valor_regex})")
     
     return merged
+
+
+# =============================================================================
+# FUNCIONES DE EXTRACCIÓN REGEX EXPANDIDAS (Plan A - Plan Z)
+# =============================================================================
+
+def extraer_numero_notaria(texto: str) -> Optional[int]:
+    """
+    Extrae el número de notaría del documento.
+    
+    El número de notaría es un identificador de 1-3 dígitos que
+    identifica a cada notaría en un estado.
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        int: Número de notaría o None
+    """
+    
+    patrones = [
+        r'[Nn]otar[ií]a\s+(?:P[uú]blica\s+)?(?:n[uú]mero|No\.?|#)\s*[:\s]*(\d+)',
+        r'[Nn]otario\s+(?:P[uú]blico\s+)?(?:n[uú]mero|No\.?|#)\s*[:\s]*(\d+)',
+        r'[Nn]otar[ií]a\s+(\d+)(?:\s|,|\.)',
+        r'de\s+la\s+[Nn]otar[ií]a\s+(\d+)',
+    ]
+    
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            try:
+                numero = int(match.group(1))
+                if 1 <= numero <= 999:
+                    return numero
+            except (ValueError, IndexError):
+                continue
+    
+    return None
+
+
+def extraer_nombre_notario(texto: str) -> Optional[str]:
+    """
+    Extrae el nombre del notario del documento.
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        str: Nombre del notario o None
+    """
+    
+    patrones = [
+        r'ante\s+m[ií],?\s+(?:(?:Lic(?:enciado)?|Dr\.?|Mtro\.?|C\.?)\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,50}?),?\s+[Nn]otario',
+        r'([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{5,50}?),?\s+[Nn]otario\s+[Pp][uú]blico\s+(?:n[uú]mero|No\.?)',
+        r'[Nn]otario\s+(?:[Pp][uú]blico\s+)?[:\s]+(?:(?:Lic|Dr|Mtro)\.?\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,50}?)(?:\n|,|;|Notaría)',
+    ]
+    
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE | re.MULTILINE)
+        if match:
+            nombre = match.group(1).strip()
+            nombre = re.sub(r'\s+', ' ', nombre)
+            nombre = nombre.strip().rstrip(',.')
+            
+            palabras = nombre.split()
+            if len(palabras) >= 2 and len(nombre) >= 10:
+                return nombre
+    
+    return None
+
+
+def extraer_rfc_todos(texto: str) -> List[str]:
+    """
+    Extrae TODOS los RFC encontrados en el documento.
+    
+    FORMATO RFC MEXICANO:
+    =====================
+    - Persona física: 4 letras + 6 dígitos + 3 alfanuméricos (13 chars)
+    - Persona moral: 3 letras + 6 dígitos + 3 alfanuméricos (12 chars)
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        List[str]: Lista de RFCs encontrados (sin duplicados)
+    """
+    
+    patron = r'\b([A-ZÑ&]{3,4}\d{6}[A-Z0-9]{3})\b'
+    matches = re.findall(patron, texto.upper())
+    rfcs_unicos = list(dict.fromkeys(matches))
+    
+    rfcs_validos = []
+    for rfc in rfcs_unicos:
+        if len(rfc) in [12, 13]:
+            rfcs_validos.append(rfc)
+    
+    return rfcs_validos
+
+
+def extraer_curp_todos(texto: str) -> List[str]:
+    """
+    Extrae TODOS los CURP encontrados en el documento.
+    
+    FORMATO CURP MEXICANO:
+    ======================
+    18 caracteres: 4 letras + 6 dígitos + 1 letra (sexo) + 2 letras (estado) 
+                   + 3 consonantes + 1 dígito/letra + 1 dígito
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        List[str]: Lista de CURPs encontrados (sin duplicados)
+    """
+    
+    patron = r'\b([A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d)\b'
+    matches = re.findall(patron, texto.upper())
+    
+    return list(dict.fromkeys(matches))
+
+
+def extraer_municipio(texto: str) -> Optional[str]:
+    """
+    Extrae el municipio/ciudad donde se firma el documento.
+    
+    PATRONES QUE BUSCA:
+    ===================
+    - "En la ciudad de Guadalajara, Jalisco"
+    - "En el municipio de Zapopan"
+    - "ciudad de México, Ciudad de México"
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        str: Nombre del municipio o None
+    """
+    
+    patrones = [
+        r'[Ee]n\s+(?:la\s+)?ciudad\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:,|\s+[A-Z])',
+        r'[Ee]n\s+(?:el\s+)?municipio\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:,|\s+[A-Z])',
+        r'ciudad\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:,|\.|\s+[Ee]stado)',
+    ]
+    
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            municipio = match.group(1).strip()
+            municipio = re.sub(r'\s+', ' ', municipio)
+            municipio = municipio.strip().rstrip(',.')
+            
+            if 3 <= len(municipio) <= 50:
+                return municipio
+    
+    return None
+
+
+# =============================================================================
+# FIX #2: extraer_estado CORREGIDO
+# =============================================================================
+
+def extraer_estado(texto: str) -> Optional[str]:
+    """
+    Extrae el estado donde se firma el documento.
+    
+    FIX #2 APLICADO:
+    ================
+    - Busca en contexto específico ("ciudad de X, ESTADO" o "En X, ESTADO")
+    - No retorna el primer estado que encuentre de la lista
+    - Prioriza estados que aparecen junto al municipio
+    
+    PROBLEMA ORIGINAL:
+    ==================
+    El documento tenía:
+      - "Representante Regional de Jalisco, Michoacán, Nayarit y Colima"
+      - "En la Ciudad de Tepic, Nayarit"
+    
+    La función original iteraba la lista de estados alfabéticamente y
+    retornaba "Colima" porque aparece antes que "Nayarit" en la lista.
+    
+    SOLUCIÓN:
+    =========
+    1. Buscar primero en patrones específicos de ubicación
+    2. "ciudad de X, ESTADO" tiene prioridad sobre menciones sueltas
+    3. Solo usar búsqueda en lista completa como fallback
+    
+    Args:
+        texto: Texto del documento OCR
+        
+    Returns:
+        str: Nombre del estado o None
+    """
+    
+    # Lista de estados mexicanos para validación
+    ESTADOS_MEXICO = [
+        "Aguascalientes", "Baja California", "Baja California Sur", "Campeche",
+        "Chiapas", "Chihuahua", "Ciudad de México", "CDMX", "Coahuila", "Colima",
+        "Durango", "Estado de México", "Guanajuato", "Guerrero", "Hidalgo",
+        "Jalisco", "México", "Michoacán", "Morelos", "Nayarit", "Nuevo León",
+        "Oaxaca", "Puebla", "Querétaro", "Quintana Roo", "San Luis Potosí",
+        "Sinaloa", "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz",
+        "Yucatán", "Zacatecas"
+    ]
+    
+    # =========================================================================
+    # ESTRATEGIA 1: Buscar en contextos ESPECÍFICOS de ubicación
+    # =========================================================================
+    # Estos patrones buscan el estado en contextos donde es MÁS PROBABLE
+    # que sea la ubicación real del documento (no una referencia).
+    
+    # Crear patrón para cualquier estado (para usar en los regex)
+    estados_patron = '|'.join(re.escape(e) for e in ESTADOS_MEXICO)
+    
+    patrones_contexto = [
+        # PATRÓN 1: "En la ciudad de X, ESTADO" o "ciudad de X, ESTADO"
+        # Ejemplo: "En la Ciudad de Tepic, Nayarit"
+        # Este es el patrón MÁS CONFIABLE porque indica la ubicación del acto.
+        rf'[Cc]iudad\s+de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?,\s*({estados_patron})',
+        
+        # PATRÓN 2: "En X, ESTADO; a los" (formato de encabezado notarial)
+        # Ejemplo: "En Tepic, Nayarit; a los cinco días..."
+        rf'[Ee]n\s+[A-ZÁÉÍÓÚÑa-záéíóúñ]+,\s*({estados_patron})\s*[;,]?\s*a\s+los',
+        
+        # PATRÓN 3: "municipio de X, ESTADO"
+        # Ejemplo: "municipio de Xalisco, Nayarit"
+        rf'municipio\s+de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?,\s*({estados_patron})',
+        
+        # PATRÓN 4: "vecina/vecino de X, ESTADO" (dato de compareciente)
+        # Ejemplo: "vecina de Xalisco, Nayarit"
+        rf'vecin[oa]\s+de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?,\s*({estados_patron})',
+        
+        # PATRÓN 5: "Registro Público de la Propiedad de X, ESTADO"
+        # Ejemplo: "Registro Público de la Propiedad de Tepic, Nayarit"
+        rf'Registro\s+P[úu]blico\s+(?:de\s+la\s+Propiedad\s+)?de\s+[A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?,\s*({estados_patron})',
+        
+        # PATRÓN 6: "Estado de ESTADO" (mención explícita)
+        # Ejemplo: "Estado de Nayarit"
+        rf'[Ee]stado\s+de\s+({estados_patron})',
+        
+        # PATRÓN 7: "Capital del Estado de ESTADO"
+        # Ejemplo: "Capital del Estado de Nayarit"
+        rf'[Cc]apital\s+del\s+[Ee]stado\s+de\s+({estados_patron})',
+    ]
+    
+    # Buscar en cada patrón de contexto
+    for patron in patrones_contexto:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            estado_encontrado = match.group(1)
+            
+            # Normalizar el estado encontrado (buscar en lista oficial)
+            for estado_oficial in ESTADOS_MEXICO:
+                if estado_oficial.lower() == estado_encontrado.lower():
+                    return estado_oficial
+            
+            # Si no está exactamente en la lista, retornar como está
+            return estado_encontrado
+    
+    # =========================================================================
+    # ESTRATEGIA 2 (FALLBACK): Buscar estado cerca del municipio extraído
+    # =========================================================================
+    # Si no encontramos en contextos específicos, intentamos encontrar
+    # el estado que aparece junto al municipio.
+    
+    municipio = extraer_municipio(texto)
+    if municipio:
+        # Buscar patrón "MUNICIPIO, ESTADO"
+        patron_municipio_estado = rf'{re.escape(municipio)}\s*,\s*({estados_patron})'
+        match = re.search(patron_municipio_estado, texto, re.IGNORECASE)
+        if match:
+            estado_encontrado = match.group(1)
+            for estado_oficial in ESTADOS_MEXICO:
+                if estado_oficial.lower() == estado_encontrado.lower():
+                    return estado_oficial
+    
+    # =========================================================================
+    # ESTRATEGIA 3 (ÚLTIMO RECURSO): NO retornar el primer estado de la lista
+    # =========================================================================
+    # A diferencia de la versión original, NO iteramos la lista completa
+    # buscando cualquier mención. Esto evita falsos positivos como "Colima"
+    # cuando el documento menciona "Jalisco, Michoacán, Nayarit y Colima"
+    # en una lista de jurisdicciones.
+    #
+    # Si llegamos aquí, es mejor retornar None que un estado incorrecto.
+    
+    return None
+
+
+def extraer_todos_regex(texto: str) -> Dict[str, Any]:
+    """
+    Ejecuta TODAS las extracciones por regex disponibles.
+    
+    Esta función es el punto de entrada principal para la extracción
+    por regex del Plan A.
+    
+    Args:
+        texto: Texto completo del documento OCR
+        
+    Returns:
+        Dict con todos los campos extraídos:
+        {
+            "numero_escritura": int | None,
+            "numero_notaria": int | None,
+            "nombre_notario": str | None,
+            "fecha_documento": str | None,
+            "monto_operacion": str | None,
+            "municipio": str | None,
+            "estado": str | None,
+            "rfcs": List[str],
+            "curps": List[str],
+        }
+    """
+    
+    return {
+        # Campos principales
+        "numero_escritura": extraer_numero_escritura(texto),
+        "fecha_documento": extraer_fecha_documento(texto),
+        "monto_operacion": extraer_monto_operacion(texto),
+        
+        # Campos de notaría
+        "numero_notaria": extraer_numero_notaria(texto),
+        "nombre_notario": extraer_nombre_notario(texto),
+        
+        # Campos de ubicación
+        "municipio": extraer_municipio(texto),
+        "estado": extraer_estado(texto),
+        
+        # Listas de identificadores
+        "rfcs": extraer_rfc_todos(texto),
+        "curps": extraer_curp_todos(texto),
+    }
+
+
+def validar_dato_en_texto(dato: Any, texto: str) -> bool:
+    """
+    Verifica si un dato extraído existe literalmente en el texto original.
+    
+    Esta es la base de la validación cruzada (Plan B).
+    
+    Args:
+        dato: El dato a buscar (puede ser str, int, etc.)
+        texto: El texto original donde buscar
+        
+    Returns:
+        True si el dato se encuentra en el texto
+        
+    Ejemplo:
+        >>> validar_dato_en_texto(18226, "ESCRITURA NÚMERO 18,226")
+        True
+        >>> validar_dato_en_texto("Juan Pérez", "comparece JUAN PÉREZ GARCÍA")
+        True
+    """
+    if dato is None:
+        return False
+    
+    dato_str = str(dato)
+    texto_upper = texto.upper()
+    
+    # Para números, buscar con diferentes formatos
+    if isinstance(dato, (int, float)):
+        # Buscar número exacto
+        if re.search(rf'\b{dato_str}\b', texto):
+            return True
+        # Buscar con formato de miles (18,226)
+        if isinstance(dato, int) and dato >= 1000:
+            formato_miles = f"{dato:,}"
+            if formato_miles in texto:
+                return True
+        return False
+    
+    # Para strings
+    if isinstance(dato, str):
+        # Búsqueda case-insensitive
+        if dato.upper() in texto_upper:
+            return True
+        
+        # Para montos, limpiar formato
+        if dato.startswith("$"):
+            numero = re.sub(r'[^\d.]', '', dato)
+            if numero in texto:
+                return True
+        
+        # Buscar palabras individuales (para nombres)
+        palabras = dato.upper().split()
+        if len(palabras) >= 2:
+            encontradas = sum(1 for p in palabras if p in texto_upper)
+            if encontradas >= len(palabras) * 0.6:  # 60% de palabras
+                return True
+        
+        return False
+    
+    return False
+
+
+# =============================================================================
+# CÓDIGO DE PRUEBA
+# =============================================================================
+
+if __name__ == "__main__":
+    print("=" * 70)
+    print("PRUEBA DE text_processing.py CON FIXES #1 y #2")
+    print("=" * 70)
+    
+    # Texto de prueba (simulando el documento problemático)
+    texto_prueba = """
+    MEDIA URRES . TITULAIRESN NS UNIDOS Y LIC. RIGOBERTO OCHOA TORRES 
+    Instrumento Público Número 2307 dos mil trescientos siete. Tomo Tercero.
+    En la Ciudad de Tepic, Nayarit; a los 05 cinco días del mes de Mayo del año 2023.
+    
+    El Arquitecto ERNESTO PADILLA ACEVES, en representación legal de la persona 
+    moral oficial denominada INSTITUTO NACIONAL DEL SUELO SUSTENTABLE, como 
+    Representante Regional de Jalisco, Michoacán, Nayarit y Colima.
+    
+    El precio de esta operación es por la cantidad de $8,654.00 
+    (OCHO MIL SEISCIENTOS CINCUENTA Y CUATRO PESOS 00/100 MONEDA NACIONAL).
+    
+    vecina de Xalisco, Nayarit, con domicilio en calle Estaño número 49.
+    
+    LA PRESENTE ESCRITURA NO 2,397 SE TRAMITÓ CONFORME A LA LEY
+    REALIZANDO LOS MOVIMIENTOS CATASTRALES CORRESPONDIENTES
+    """
+    
+    print("\n📄 PRUEBA DE EXTRACCIÓN CON FIXES")
+    print("-" * 70)
+    
+    # Probar Fix #1: numero_escritura
+    print("\n🔧 FIX #1: extraer_numero_escritura")
+    resultado = extraer_numero_escritura(texto_prueba)
+    esperado = 2307
+    print(f"   Esperado: {esperado}")
+    print(f"   Obtenido: {resultado}")
+    print(f"   {'✅ CORRECTO' if resultado == esperado else '❌ INCORRECTO'}")
+    
+    # Probar Fix #2: estado
+    print("\n🔧 FIX #2: extraer_estado")
+    resultado = extraer_estado(texto_prueba)
+    esperado = "Nayarit"
+    print(f"   Esperado: {esperado}")
+    print(f"   Obtenido: {resultado}")
+    print(f"   {'✅ CORRECTO' if resultado == esperado else '❌ INCORRECTO'}")
+    
+    # Probar extracción completa
+    print("\n📊 EXTRACCIÓN COMPLETA (extraer_todos_regex)")
+    print("-" * 70)
+    resultados = extraer_todos_regex(texto_prueba)
+    
+    for campo, valor in resultados.items():
+        if valor is not None and valor != []:
+            print(f"   ✅ {campo}: {valor}")
+        else:
+            print(f"   ❌ {campo}: No encontrado")
+    
+    print("\n" + "=" * 70)
+    print("FIN DE PRUEBAS")
+    print("=" * 70)
