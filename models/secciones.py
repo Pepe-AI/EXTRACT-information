@@ -101,12 +101,10 @@ SECCION_POR_CAMPO: Dict[str, str] = {
     "nombre_notario": "encabezado",
     "fecha_documento": "encabezado",
     "municipio": "encabezado",
-    "estado": "encabezado",
     "tipo_titular": "comparecientes",
     "titulares": "comparecientes",
     "adquirientes": "comparecientes",
     "monto_operacion": "clausulas",
-    "tipo_moneda": "clausulas",
     "valor_catastral": "clausulas",
 }
 
@@ -242,8 +240,8 @@ class SeccionesDocumento(BaseModel):
         if campo in ["numero_escritura", "numero_notaria", "nombre_notario", "fecha_documento"]:
             # Estos campos suelen estar al inicio
             return texto[:3500]
-        
-        elif campo in ["monto_operacion", "tipo_moneda", "valor_catastral"]:
+
+        elif campo in ["monto_operacion", "valor_catastral"]:
             # Estos campos suelen estar en medio-final
             mitad = len(texto) // 2
             return texto[max(0, mitad-2000):min(len(texto), mitad+2000)]

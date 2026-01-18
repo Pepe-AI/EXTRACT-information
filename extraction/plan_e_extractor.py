@@ -415,7 +415,7 @@ class PlanEExtractor:
             return texto_completo[:3500]
         
         # Campos que suelen estar en medio-final
-        elif campo in ["monto_operacion", "tipo_moneda", "valor_catastral"]:
+        elif campo in ["monto_operacion", "valor_catastral"]:
             mitad = len(texto_completo) // 2
             return texto_completo[max(0, mitad-2000):min(len(texto_completo), mitad+2000)]
         

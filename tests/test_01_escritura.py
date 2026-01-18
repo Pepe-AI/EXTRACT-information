@@ -17,10 +17,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.escritura import (
     # Modelos estrictos
     EscrituraPublica,
+    Notario,
     Titular,
     Adquiriente,
     Representante,
-    
+
     # Modelos flexibles
     EscrituraPublicaFlexible,
     TitularFlexible,
@@ -43,7 +44,15 @@ def test_modelo_estricto_completo():
     print("="*60)
     
     escritura = EscrituraPublica(
-        notario="Lic. Roberto García",
+        notario=[
+            Notario(
+                nombre="Lic. Roberto García",
+                numero_notario="45",
+                municipio="Ciudad de México",
+                escritura="3125",
+                fecha_documento="15 de mayo de 2024"
+            )
+        ],
         numero_escritura=3125,
         fecha_documento="15 de mayo de 2024",
         tipo_titular="empresa",
@@ -68,8 +77,7 @@ def test_modelo_estricto_completo():
                 curp=False
             )
         ],
-        monto_operacion="$1,500,000.00",
-        tipo_moneda="MXN"
+        monto_operacion="$1,500,000.00"
     )
     
     print(f"\n✅ Escritura creada exitosamente")
@@ -273,8 +281,7 @@ def test_multiples_titulares_adquirientes():
             {"nombre": "Comprador 1", "estado_civil": "soltero"},
             {"nombre": "Comprador 2", "estado_civil": "casado"}
         ],
-        "monto_operacion": "$500,000",
-        "tipo_moneda": "MXN"
+        "monto_operacion": "$500,000"
     }
     
     escritura = validar_json_flexible(json_data)

@@ -32,7 +32,7 @@ NO_ENCONTRADO = "NO SE ENCONTRÓ DATO"
 # Campos permitidos en cada nivel (para validación y limpieza)
 CAMPOS_RAIZ_PERMITIDOS = {
     "notario", "numero_escritura", "fecha_documento", "tipo_titular",
-    "titulares", "adquirientes", "monto_operacion", "tipo_moneda", "valor_catastral"
+    "titulares", "adquirientes", "monto_operacion", "valor_catastral"
 }
 
 # NUEVO: Campos permitidos dentro de cada objeto notario
@@ -321,9 +321,8 @@ def _normalizar_valores_null(json_data: dict) -> dict:
     # Campos que DEBEN ser string (no pueden ser null)
     CAMPOS_STRING_OBLIGATORIOS = {
         "fecha_documento",
-        "tipo_titular", 
+        "tipo_titular",
         "monto_operacion",
-        "tipo_moneda",
         "nombre",
         "actua_por",
         "en_calidad",
@@ -416,7 +415,6 @@ EJEMPLO_JSON_EMPRESA = {
         }
     ],
     "monto_operacion": "$8,654.00",
-    "tipo_moneda": "MXN",
     "valor_catastral": None
 }
 
@@ -457,7 +455,6 @@ EJEMPLO_JSON_EMPRESA_2 = {
         }
     ],
     "monto_operacion": "$3,100,000.00",
-    "tipo_moneda": "MXN",
     "valor_catastral": None
 }
 
@@ -492,7 +489,6 @@ EJEMPLO_JSON_PERSONA = {
         }
     ],
     "monto_operacion": "$1,200,000.00",
-    "tipo_moneda": "MXN",
     "valor_catastral": "$950,000.00"
 }
 

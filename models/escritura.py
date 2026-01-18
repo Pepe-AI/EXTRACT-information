@@ -157,7 +157,6 @@ class EscrituraPublicaFlexible(BaseModel):
     titulares: Optional[List[TitularFlexible]] = Field(default_factory=list)
     adquirientes: Optional[List[AdquirienteFlexible]] = Field(default_factory=list)
     monto_operacion: Optional[str] = Field(default=NO_ENCONTRADO)
-    tipo_moneda: Optional[str] = Field(default=NO_ENCONTRADO)
     valor_catastral: Optional[str] = Field(default=None)
     
     model_config = {"extra": "allow"}
@@ -227,8 +226,6 @@ class EscrituraPublicaFlexible(BaseModel):
             encontrados["adquirientes"] = [a.model_dump() for a in self.adquirientes]
         if self.monto_operacion and self.monto_operacion != NO_ENCONTRADO:
             encontrados["monto_operacion"] = self.monto_operacion
-        if self.tipo_moneda and self.tipo_moneda != NO_ENCONTRADO:
-            encontrados["tipo_moneda"] = self.tipo_moneda
         if self.valor_catastral:
             encontrados["valor_catastral"] = self.valor_catastral
             
@@ -263,17 +260,15 @@ class EscrituraPublicaFlexible(BaseModel):
             no_encontrados.append("adquirientes")
         if not self.monto_operacion or self.monto_operacion == NO_ENCONTRADO:
             no_encontrados.append("monto_operacion")
-        if not self.tipo_moneda or self.tipo_moneda == NO_ENCONTRADO:
-            no_encontrados.append("tipo_moneda")
-            
+
         return no_encontrados
     
     def generar_reporte(self) -> Dict[str, Any]:
         """Genera un reporte completo de la extracción."""
         encontrados = self.get_campos_encontrados()
         no_encontrados = self.get_campos_no_encontrados()
-        
-        total_campos = 8
+
+        total_campos = 7
         campos_encontrados = total_campos - len(no_encontrados)
         porcentaje = (campos_encontrados / total_campos) * 100
         
@@ -452,7 +447,6 @@ class EscrituraPublica(BaseModel):
     titulares: List[Titular] = Field(..., min_length=1)
     adquirientes: List[Adquiriente] = Field(..., min_length=1)
     monto_operacion: str = Field(..., description="Monto de la operación")
-    tipo_moneda: str = Field(..., description="Tipo de moneda")
     valor_catastral: Optional[str] = Field(default=None)
     
     @field_validator('numero_escritura')
@@ -526,7 +520,7 @@ def get_campos_obligatorios() -> List[str]:
     return [
         "notario", "numero_escritura", "fecha_documento",
         "tipo_titular", "titulares", "adquirientes",
-        "monto_operacion", "tipo_moneda"
+        "monto_operacion"
     ]
 
 
@@ -556,7 +550,6 @@ def _normalizar_campos(data: Dict[str, Any]) -> Dict[str, Any]:
         "fecha_escritura": "fecha_documento",
         "monto": "monto_operacion",
         "precio": "monto_operacion",
-        "moneda": "tipo_moneda",
     }
     
     resultado = {}
@@ -649,9 +642,9 @@ def analizar_json_parcial(json_data: dict, tipo_titular: str = None) -> dict:
     Analiza un JSON parcial y devuelve información detallada.
     """
     campos_requeridos = [
-        "notario", "numero_escritura", "fecha_documento", 
+        "notario", "numero_escritura", "fecha_documento",
         "tipo_titular", "titulares", "adquirientes",
-        "monto_operacion", "tipo_moneda"
+        "monto_operacion"
     ]
     
     encontrados = []

@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/proyectos gisnet/Extract_information_pdf/EXTRACT-information)",
+      "Bash(python -m tests.test_01_escritura:*)",
+      "Bash(iconv:*)",
+      "Bash(python:*)"
+    ]
+  }
+}

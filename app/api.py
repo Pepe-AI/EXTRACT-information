@@ -347,7 +347,6 @@ async def get_schema():
                 }
             ],
             "monto_operacion": "string - Monto de la operación",
-            "tipo_moneda": "string - Tipo de moneda (MXN, USD, etc.)",
             "valor_catastral": "string | null - Valor catastral"
         }
     }
