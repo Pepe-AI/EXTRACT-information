@@ -117,14 +117,16 @@ class TitularFlexible(BaseModel):
 
 class AdquirienteFlexible(BaseModel):
     """Adquiriente con todos los campos opcionales."""
-    
+
     nombre: Optional[str] = Field(default=NO_ENCONTRADO)
+    actua_por: Optional[str] = Field(default=NO_ENCONTRADO)
     estado_civil: Optional[str] = Field(default=NO_ENCONTRADO)
     tipo_sociedad: Optional[str] = Field(default=None)
     edad: Optional[int] = Field(default=None)
     rfc: Optional[Union[str, bool]] = Field(default=False)
     curp: Optional[Union[str, bool]] = Field(default=False)
-    
+    representante: Optional[RepresentanteFlexible] = Field(default=None)
+
     model_config = {"extra": "allow"}
 
 
@@ -405,13 +407,15 @@ class Titular(BaseModel):
 
 class Adquiriente(BaseModel):
     """Adquiriente con campos obligatorios."""
-    
+
     nombre: str = Field(..., description="Nombre del adquiriente")
+    actua_por: str = Field(..., description="En qué calidad actúa")
     estado_civil: str = Field(..., description="Estado civil")
     tipo_sociedad: Optional[str] = Field(default=None)
     edad: Optional[int] = Field(default=None)
     rfc: Union[str, bool] = Field(default=False)
     curp: Union[str, bool] = Field(default=False)
+    representante: Optional[Representante] = Field(default=None)
 
 
 class EscrituraPublica(BaseModel):
@@ -459,18 +463,45 @@ class EscrituraPublica(BaseModel):
     @model_validator(mode='after')
     def validar_representantes(self):
         """
-        Valida representante según tipo de titular.
-        
-        REGLA:
-        - EMPRESA: Representante es OBLIGATORIO
-        - PERSONA: Representante es OPCIONAL
+        Valida representantes según si son empresas o personas.
+
+        REGLAS:
+        - Si tipo_titular = "empresa":
+          * TODOS los titulares DEBEN tener representante
+        - Si algún adquiriente es empresa:
+          * Ese adquiriente DEBE tener representante
+        - Si es persona (titular o adquiriente):
+          * Representante es OPCIONAL
         """
+        # Validar titulares (lógica existente)
         if self.tipo_titular.lower() == "empresa":
             for i, titular in enumerate(self.titulares):
                 if titular.representante is None:
                     raise ValueError(
                         f"Titular #{i+1} es EMPRESA y DEBE tener representante"
                     )
+
+        # NUEVO: Validar adquirientes
+        # Como los adquirientes pueden ser personas o empresas individualmente,
+        # necesitamos detectar si es empresa por el nombre
+        for i, adq in enumerate(self.adquirientes):
+            # Si el nombre contiene indicadores de empresa
+            indicadores_empresa = [
+                "S.A.", "S. A.", "S.A", "SA DE CV", "S DE RL",
+                "SOCIEDAD", "ASOCIACION", "INSTITUTO", "FUNDACION",
+                "S.C.", "A.C.", "I.A.P."
+            ]
+
+            nombre_upper = adq.nombre.upper()
+            es_empresa = any(ind in nombre_upper for ind in indicadores_empresa)
+
+            # Si detectamos que es empresa y NO tiene representante
+            if es_empresa and adq.representante is None:
+                raise ValueError(
+                    f"Adquiriente #{i+1} '{adq.nombre}' parece ser EMPRESA "
+                    f"y DEBE tener representante"
+                )
+
         return self
 
 
@@ -599,14 +630,20 @@ def _normalizar_adquiriente(adq: Dict[str, Any]) -> Dict[str, Any]:
         "nombre_completo": "nombre",
         "nombre_adquiriente": "nombre",
         "edo_civil": "estado_civil",
+        "actua": "actua_por",
     }
-    
+
     resultado = {}
     for key, value in adq.items():
         key_lower = key.lower().strip()
         key_norm = mapeo.get(key_lower, key_lower)
+
+        # Normalizar representante si viene como string
+        if key_norm == "representante" and isinstance(value, str):
+            value = {"nombre": value} if value.strip() else None
+
         resultado[key_norm] = value
-    
+
     return resultado
 
 

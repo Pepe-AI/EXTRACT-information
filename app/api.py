@@ -339,11 +339,19 @@ async def get_schema():
             "adquirientes": [
                 {
                     "nombre": "string - Nombre del adquiriente",
+                    "actua_por": "string - En qué calidad actúa (derecho propio o representación)",
                     "estado_civil": "string",
                     "tipo_sociedad": "string | null",
                     "edad": "integer | null",
                     "rfc": "string | boolean",
-                    "curp": "string | boolean"
+                    "curp": "string | boolean",
+                    "representante": {
+                        "nombre": "string",
+                        "en_calidad": "string",
+                        "escritura": "string",
+                        "bis": "boolean",
+                        "fecha_poder": "string"
+                    } | null
                 }
             ],
             "monto_operacion": "string - Monto de la operación",

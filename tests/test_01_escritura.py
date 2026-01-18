@@ -72,6 +72,7 @@ def test_modelo_estricto_completo():
         adquirientes=[
             Adquiriente(
                 nombre="Carlos Rodríguez",
+                actua_por="derecho propio",
                 estado_civil="casado",
                 rfc="ROMC790515ABC",
                 curp=False
@@ -330,12 +331,110 @@ def test_analizar_json_parcial():
     assert len(analisis['problemas_detectados']) >= 2  # Al menos 2 problemas
 
 
+def test_adquiriente_empresa_con_representante():
+    """Prueba 12: Adquiriente empresa con representante."""
+    print("\n" + "="*60)
+    print("PRUEBA 12: Adquiriente EMPRESA con representante")
+    print("="*60)
+
+    escritura = EscrituraPublica(
+        notario=[
+            Notario(
+                nombre="Lic. Roberto García",
+                numero_notario="45",
+                municipio="Ciudad de México",
+                escritura="3125",
+                fecha_documento="15 de mayo de 2024"
+            )
+        ],
+        numero_escritura=3125,
+        fecha_documento="15 de mayo de 2024",
+        tipo_titular="persona",
+        titulares=[
+            Titular(
+                nombre="Juan Pérez",
+                actua_por="derecho propio",
+                representante=None
+            )
+        ],
+        adquirientes=[
+            Adquiriente(
+                nombre="CONSTRUCTORA ABC S.A. DE C.V.",
+                actua_por="representación",
+                estado_civil="NO SE ENCONTRÓ DATO",
+                rfc=False,
+                curp=False,
+                representante=Representante(
+                    nombre="María López García",
+                    en_calidad="apoderado legal",
+                    escritura="5678",
+                    bis=False,
+                    fecha_poder="10 de marzo de 2023"
+                )
+            )
+        ],
+        monto_operacion="$1,500,000.00"
+    )
+
+    print(f"\nAdquiriente empresa creado exitosamente")
+    print(f"   Adquiriente: {escritura.adquirientes[0].nombre}")
+    print(f"   Representante: {escritura.adquirientes[0].representante.nombre}")
+    assert escritura.adquirientes[0].representante is not None
+
+
+def test_adquiriente_empresa_sin_representante_debe_fallar():
+    """Prueba 13: Adquiriente empresa SIN representante debe fallar."""
+    print("\n" + "="*60)
+    print("PRUEBA 13: Adquiriente EMPRESA sin representante (debe fallar)")
+    print("="*60)
+
+    try:
+        escritura = EscrituraPublica(
+            notario=[
+                Notario(
+                    nombre="Lic. Roberto García",
+                    numero_notario="45",
+                    municipio="Ciudad de México",
+                    escritura="3125",
+                    fecha_documento="15 de mayo de 2024"
+                )
+            ],
+            numero_escritura=3125,
+            fecha_documento="15 de mayo de 2024",
+            tipo_titular="persona",
+            titulares=[
+                Titular(
+                    nombre="Juan Pérez",
+                    actua_por="derecho propio",
+                    representante=None
+                )
+            ],
+            adquirientes=[
+                Adquiriente(
+                    nombre="CONSTRUCTORA ABC S.A. DE C.V.",
+                    actua_por="representación",
+                    estado_civil="NO SE ENCONTRÓ DATO",
+                    rfc=False,
+                    curp=False,
+                    representante=None
+                )
+            ],
+            monto_operacion="$1,500,000.00"
+        )
+        print("\nERROR: Debería haber fallado pero no lo hizo")
+        assert False, "La validación debería haber fallado"
+    except ValueError as e:
+        print(f"\nValidación correcta: {e}")
+        assert "parece ser EMPRESA" in str(e)
+        assert "DEBE tener representante" in str(e)
+
+
 def main():
     print("\n" + "#"*60)
     print("# PRUEBAS DE MODELOS PYDANTIC")
     print("# (Estricto + Flexible + Retry Inteligente)")
     print("#"*60)
-    
+
     try:
         test_modelo_estricto_completo()
         test_modelo_estricto_falla_sin_campos()
@@ -348,17 +447,19 @@ def main():
         test_campos_obligatorios()
         test_multiples_titulares_adquirientes()
         test_analizar_json_parcial()
-        
+        test_adquiriente_empresa_con_representante()
+        test_adquiriente_empresa_sin_representante_debe_fallar()
+
         print("\n" + "="*60)
-        print("✅ TODAS LAS PRUEBAS PASARON (11/11)")
+        print("✅ TODAS LAS PRUEBAS PASARON (13/13)")
         print("="*60 + "\n")
-        
+
     except Exception as e:
         print(f"\n❌ ERROR: {e}")
         import traceback
         traceback.print_exc()
         return 1
-    
+
     return 0
 
 

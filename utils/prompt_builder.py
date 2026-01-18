@@ -53,7 +53,7 @@ CAMPOS_REPRESENTANTE_PERMITIDOS = {
 }
 
 CAMPOS_ADQUIRIENTE_PERMITIDOS = {
-    "nombre", "estado_civil", "tipo_sociedad", "edad", "rfc", "curp"
+    "nombre", "actua_por", "estado_civil", "tipo_sociedad", "edad", "rfc", "curp", "representante"
 }
 
 
@@ -407,11 +407,13 @@ EJEMPLO_JSON_EMPRESA = {
     "adquirientes": [
         {
             "nombre": "Angelita Pérez Soto",
+            "actua_por": "derecho propio",
             "estado_civil": "casada",
             "tipo_sociedad": None,
             "edad": None,
             "rfc": False,
-            "curp": False
+            "curp": False,
+            "representante": None
         }
     ],
     "monto_operacion": "$8,654.00",
@@ -447,11 +449,13 @@ EJEMPLO_JSON_EMPRESA_2 = {
     "adquirientes": [
         {
             "nombre": "BEATRIZ PICHARDO MENDOZA",
+            "actua_por": "derecho propio",
             "estado_civil": "casada",
             "tipo_sociedad": "separación de bienes",
             "edad": None,
             "rfc": False,
-            "curp": False
+            "curp": False,
+            "representante": None
         }
     ],
     "monto_operacion": "$3,100,000.00",
@@ -481,11 +485,13 @@ EJEMPLO_JSON_PERSONA = {
     "adquirientes": [
         {
             "nombre": "Ana María Rodríguez López",
+            "actua_por": "derecho propio",
             "estado_civil": "soltera",
             "tipo_sociedad": None,
             "edad": 35,
             "rfc": "ROLA890515ABC",
-            "curp": False
+            "curp": False,
+            "representante": None
         }
     ],
     "monto_operacion": "$1,200,000.00",
@@ -1301,10 +1307,22 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
                 adq_limpio = {}
                 for campo in CAMPOS_ADQUIRIENTE_PERMITIDOS:
                     if campo in adq:
-                        adq_limpio[campo] = adq[campo]
+                        # Limpiar representante recursivamente
+                        if campo == "representante" and isinstance(adq[campo], dict):
+                            rep_limpio = {}
+                            for rep_campo in CAMPOS_REPRESENTANTE_PERMITIDOS:
+                                if rep_campo in adq[campo]:
+                                    rep_limpio[rep_campo] = adq[campo][rep_campo]
+                            adq_limpio[campo] = rep_limpio if rep_limpio else None
+                        else:
+                            adq_limpio[campo] = adq[campo]
                     else:
                         # Valores por defecto
-                        if campo in ["rfc", "curp"]:
+                        if campo == "actua_por":
+                            adq_limpio[campo] = None
+                        elif campo == "representante":
+                            adq_limpio[campo] = None
+                        elif campo in ["rfc", "curp"]:
                             adq_limpio[campo] = False
                         else:
                             adq_limpio[campo] = None
