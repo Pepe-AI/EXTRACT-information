@@ -32,6 +32,58 @@ class TipoTitular(str, Enum):
 # MODELOS FLEXIBLES (Todo opcional)
 # =============================================================================
 
+class NotarioFlexible(BaseModel):
+    """
+    Modelo FLEXIBLE para datos del notario.
+    
+    ESTRUCTURA:
+    ===========
+    - nombre: Nombre completo del notario
+    - numero_notario: Número de notaría (2-3 dígitos, ej: "45", "123")
+    - municipio: Municipio donde ejerce
+    - escritura: Número de escritura (4-7 dígitos, ej: "2307", "1234567")
+    - fecha_documento: Fecha del documento notarial
+    
+    NOTA: Este modelo se usa dentro de un array, pero solo puede
+    existir UN notario por documento.
+    """
+    
+    nombre: Optional[str] = Field(default=NO_ENCONTRADO, description="Nombre del notario")
+    numero_notario: Optional[Union[str, int]] = Field(
+        default=NO_ENCONTRADO, 
+        description="Número de notaría (2-3 dígitos)"
+    )
+    municipio: Optional[str] = Field(default=NO_ENCONTRADO, description="Municipio de la notaría")
+    escritura: Optional[Union[str, int]] = Field(
+        default=NO_ENCONTRADO, 
+        description="Número de escritura (4-7 dígitos)"
+    )
+    fecha_documento: Optional[str] = Field(default=NO_ENCONTRADO, description="Fecha del documento")
+    
+    model_config = {"extra": "allow"}
+    
+    @field_validator('numero_notario', 'escritura', mode='before')
+    @classmethod
+    def convertir_numero_a_string(cls, v):
+        """
+        Convierte números a string para consistencia.
+        
+        ¿Por qué?
+        =========
+        El LLM puede devolver estos campos como int o string.
+        Los normalizamos siempre a string para evitar inconsistencias.
+        
+        Ejemplo:
+            2307 → "2307"
+            "45" → "45"
+        """
+        if v is None:
+            return NO_ENCONTRADO
+        if isinstance(v, int):
+            return str(v)
+        return v
+
+
 class RepresentanteFlexible(BaseModel):
     """Representante con todos los campos opcionales."""
     
@@ -81,32 +133,35 @@ class AdquirienteFlexible(BaseModel):
 class EscrituraPublicaFlexible(BaseModel):
     """
     Modelo FLEXIBLE - Acepta cualquier dato que venga.
+    
+    CAMBIO IMPORTANTE EN notario:
+    =============================
+    Antes: notario era un string simple
+    Ahora: notario es un array con UN objeto que contiene:
+        - nombre: Nombre del notario
+        - numero_notario: Número de notaría (2-3 dígitos)
+        - municipio: Municipio de la notaría
+        - escritura: Número de escritura (4-7 dígitos)
+        - fecha_documento: Fecha del documento
+    
+    NOTA: Aunque es array, solo puede existir UN notario.
     """
-
+    
+    # notario ahora es una LISTA con un solo elemento
+    notario: Optional[List[NotarioFlexible]] = Field(default_factory=list)
+    
+    # Estos campos se mantienen para compatibilidad, pero los datos
+    # principales ahora están en notario[0].escritura y notario[0].fecha_documento
     numero_escritura: Optional[int] = Field(default=None)
     fecha_documento: Optional[str] = Field(default=NO_ENCONTRADO)
-    numero_notaria: Optional[Union[str, int]] = Field(default=NO_ENCONTRADO)
-    municipio: Optional[str] = Field(default=NO_ENCONTRADO)
-    nombre_notario: Optional[str] = Field(default=NO_ENCONTRADO)
-
+    
     tipo_titular: Optional[str] = Field(default=NO_ENCONTRADO)
     titulares: Optional[List[TitularFlexible]] = Field(default_factory=list)
     adquirientes: Optional[List[AdquirienteFlexible]] = Field(default_factory=list)
     monto_operacion: Optional[str] = Field(default=NO_ENCONTRADO)
     valor_catastral: Optional[str] = Field(default=None)
-    curps: Optional[List[str]] = Field(default_factory=list)
-
+    
     model_config = {"extra": "allow"}
-
-    @field_validator('numero_notaria', mode='before')
-    @classmethod
-    def convertir_numero_notaria_a_string(cls, v):
-        """Convierte numero_notaria a string si viene como número."""
-        if v is None:
-            return NO_ENCONTRADO
-        if isinstance(v, int):
-            return str(v)
-        return v
     
     @field_validator('monto_operacion', mode='before')
     @classmethod
@@ -149,19 +204,22 @@ class EscrituraPublicaFlexible(BaseModel):
     def get_campos_encontrados(self) -> Dict[str, Any]:
         """
         Devuelve solo los campos que SÍ se encontraron.
+        
+        NOTA: Para notario, verificamos si existe el array y tiene datos válidos.
         """
         encontrados = {}
-
+        
+        # Verificar notario (nueva estructura como array)
+        if self.notario and len(self.notario) > 0:
+            notario_obj = self.notario[0]
+            # Verificar si tiene al menos el nombre
+            if notario_obj.nombre and notario_obj.nombre != NO_ENCONTRADO:
+                encontrados["notario"] = [n.model_dump() for n in self.notario]
+        
         if self.numero_escritura is not None:
             encontrados["numero_escritura"] = self.numero_escritura
         if self.fecha_documento and self.fecha_documento != NO_ENCONTRADO:
             encontrados["fecha_documento"] = self.fecha_documento
-        if self.numero_notaria and self.numero_notaria != NO_ENCONTRADO:
-            encontrados["numero_notaria"] = self.numero_notaria
-        if self.municipio and self.municipio != NO_ENCONTRADO:
-            encontrados["municipio"] = self.municipio
-        if self.nombre_notario and self.nombre_notario != NO_ENCONTRADO:
-            encontrados["nombre_notario"] = self.nombre_notario
         if self.tipo_titular and self.tipo_titular != NO_ENCONTRADO:
             encontrados["tipo_titular"] = self.tipo_titular
         if self.titulares:
@@ -172,27 +230,30 @@ class EscrituraPublicaFlexible(BaseModel):
             encontrados["monto_operacion"] = self.monto_operacion
         if self.valor_catastral:
             encontrados["valor_catastral"] = self.valor_catastral
-        if self.curps:
-            encontrados["curps"] = self.curps
-
+            
         return encontrados
     
     def get_campos_no_encontrados(self) -> List[str]:
         """
         Devuelve lista de campos que NO se encontraron.
+        
+        NOTA: Para notario, verificamos si el array tiene datos válidos.
         """
         no_encontrados = []
-
+        
+        # Verificar notario (nueva estructura)
+        notario_valido = False
+        if self.notario and len(self.notario) > 0:
+            notario_obj = self.notario[0]
+            if notario_obj.nombre and notario_obj.nombre != NO_ENCONTRADO:
+                notario_valido = True
+        
+        if not notario_valido:
+            no_encontrados.append("notario")
         if self.numero_escritura is None:
             no_encontrados.append("numero_escritura")
         if not self.fecha_documento or self.fecha_documento == NO_ENCONTRADO:
             no_encontrados.append("fecha_documento")
-        if not self.numero_notaria or self.numero_notaria == NO_ENCONTRADO:
-            no_encontrados.append("numero_notaria")
-        if not self.municipio or self.municipio == NO_ENCONTRADO:
-            no_encontrados.append("municipio")
-        if not self.nombre_notario or self.nombre_notario == NO_ENCONTRADO:
-            no_encontrados.append("nombre_notario")
         if not self.tipo_titular or self.tipo_titular == NO_ENCONTRADO:
             no_encontrados.append("tipo_titular")
         if not self.titulares:
@@ -209,10 +270,10 @@ class EscrituraPublicaFlexible(BaseModel):
         encontrados = self.get_campos_encontrados()
         no_encontrados = self.get_campos_no_encontrados()
 
-        total_campos = 9  # numero_escritura, fecha_documento, numero_notaria, municipio, nombre_notario, tipo_titular, titulares, adquirientes, monto_operacion
+        total_campos = 7
         campos_encontrados = total_campos - len(no_encontrados)
         porcentaje = (campos_encontrados / total_campos) * 100
-
+        
         return {
             "resumen": {
                 "campos_encontrados": campos_encontrados,
@@ -229,6 +290,95 @@ class EscrituraPublicaFlexible(BaseModel):
 # =============================================================================
 # MODELOS ESTRICTOS
 # =============================================================================
+
+class Notario(BaseModel):
+    """
+    Modelo ESTRICTO para datos del notario.
+    
+    ESTRUCTURA:
+    ===========
+    - nombre: Nombre completo del notario (OBLIGATORIO)
+    - numero_notario: Número de notaría, 2-3 dígitos (OBLIGATORIO)
+    - municipio: Municipio donde ejerce (OBLIGATORIO)
+    - escritura: Número de escritura, 4-7 dígitos (OBLIGATORIO)
+    - fecha_documento: Fecha del documento (OBLIGATORIO)
+    
+    VALIDACIONES:
+    =============
+    - numero_notario debe tener 2-3 dígitos (ej: "45", "123")
+    - escritura debe tener 4-7 dígitos (ej: "2307", "1234567")
+    
+    ¿Por qué estas validaciones?
+    ============================
+    En México, los números de notaría típicamente van del 1 al 999,
+    mientras que los números de escritura pueden ser mucho más altos
+    dependiendo de la antigüedad y actividad de la notaría.
+    """
+    
+    nombre: str = Field(..., description="Nombre del notario")
+    numero_notario: Union[str, int] = Field(..., description="Número de notaría (2-3 dígitos)")
+    municipio: str = Field(..., description="Municipio de la notaría")
+    escritura: Union[str, int] = Field(..., description="Número de escritura (4-7 dígitos)")
+    fecha_documento: str = Field(..., description="Fecha del documento")
+    
+    @field_validator('numero_notario', mode='before')
+    @classmethod
+    def validar_numero_notario(cls, v):
+        """
+        Valida y normaliza el número de notario.
+        
+        REGLAS:
+        =======
+        - Acepta int o string
+        - Convierte a string
+        - Debe tener 2-3 dígitos (10-999)
+        
+        Ejemplos válidos: 45, "45", 123, "123"
+        Ejemplos inválidos: 1, "1", 1234, "1234"
+        """
+        if isinstance(v, int):
+            v = str(v)
+        
+        # Limpiar espacios
+        v = str(v).strip()
+        
+        # Validar longitud (2-3 dígitos)
+        if len(v) < 2 or len(v) > 3:
+            raise ValueError(
+                f"numero_notario debe tener 2-3 dígitos, recibido: '{v}' ({len(v)} dígitos)"
+            )
+        
+        return v
+    
+    @field_validator('escritura', mode='before')
+    @classmethod
+    def validar_escritura(cls, v):
+        """
+        Valida y normaliza el número de escritura.
+        
+        REGLAS:
+        =======
+        - Acepta int o string
+        - Convierte a string
+        - Debe tener 4-7 dígitos (1000-9999999)
+        
+        Ejemplos válidos: 2307, "2307", 1234567, "1234567"
+        Ejemplos inválidos: 123, "123", 12345678, "12345678"
+        """
+        if isinstance(v, int):
+            v = str(v)
+        
+        # Limpiar espacios
+        v = str(v).strip()
+        
+        # Validar longitud (4-7 dígitos)
+        if len(v) < 4 or len(v) > 7:
+            raise ValueError(
+                f"escritura debe tener 4-7 dígitos, recibido: '{v}' ({len(v)} dígitos)"
+            )
+        
+        return v
+
 
 class Representante(BaseModel):
     """Representante con campos obligatorios."""
@@ -271,20 +421,37 @@ class Adquiriente(BaseModel):
 class EscrituraPublica(BaseModel):
     """
     Modelo ESTRICTO - Valida que los campos obligatorios estén presentes.
+    
+    CAMBIO EN notario:
+    ==================
+    Antes: notario era un string simple
+    Ahora: notario es un array con exactamente UN objeto Notario
+    
+    El objeto Notario contiene:
+    - nombre: Nombre del notario
+    - numero_notario: Número de notaría (2-3 dígitos)
+    - municipio: Municipio de la notaría
+    - escritura: Número de escritura (4-7 dígitos)
+    - fecha_documento: Fecha del documento
     """
-
+    
+    # notario ahora es una LISTA con exactamente 1 elemento
+    notario: List[Notario] = Field(
+        ..., 
+        min_length=1, 
+        max_length=1,
+        description="Array con un solo objeto Notario"
+    )
+    
+    # Estos campos se mantienen para compatibilidad
     numero_escritura: int = Field(..., description="Número de escritura")
     fecha_documento: str = Field(..., description="Fecha del documento")
-    numero_notaria: Union[str, int] = Field(..., description="Número de notaría")
-    municipio: str = Field(..., description="Municipio de la notaría")
-    nombre_notario: str = Field(..., description="Nombre del notario")
-
+    
     tipo_titular: str = Field(..., description="empresa o persona")
     titulares: List[Titular] = Field(..., min_length=1)
     adquirientes: List[Adquiriente] = Field(..., min_length=1)
     monto_operacion: str = Field(..., description="Monto de la operación")
     valor_catastral: Optional[str] = Field(default=None)
-    curps: Optional[List[str]] = Field(default_factory=list)
     
     @field_validator('numero_escritura')
     @classmethod
@@ -382,15 +549,15 @@ class ExtractionResponse(BaseModel):
 def get_campos_obligatorios() -> List[str]:
     """Lista de campos obligatorios."""
     return [
-        "numero_escritura", "fecha_documento", "numero_notaria",
-        "municipio", "nombre_notario", "tipo_titular",
-        "titulares", "adquirientes", "monto_operacion"
+        "notario", "numero_escritura", "fecha_documento",
+        "tipo_titular", "titulares", "adquirientes",
+        "monto_operacion"
     ]
 
 
 def get_campos_no_obligatorios() -> List[str]:
     """Lista de campos no obligatorios."""
-    return ["valor_catastral", "curps"]
+    return ["valor_catastral"]
 
 
 def validar_json_flexible(json_data: Dict[str, Any]) -> EscrituraPublicaFlexible:
@@ -512,9 +679,9 @@ def analizar_json_parcial(json_data: dict, tipo_titular: str = None) -> dict:
     Analiza un JSON parcial y devuelve información detallada.
     """
     campos_requeridos = [
-        "numero_escritura", "fecha_documento", "numero_notaria",
-        "municipio", "nombre_notario", "tipo_titular",
-        "titulares", "adquirientes", "monto_operacion"
+        "notario", "numero_escritura", "fecha_documento",
+        "tipo_titular", "titulares", "adquirientes",
+        "monto_operacion"
     ]
     
     encontrados = []
@@ -567,21 +734,18 @@ if __name__ == "__main__":
     print("=" * 60)
     print("PRUEBA DE MODELOS PYDANTIC")
     print("=" * 60)
-
+    
     json_prueba = {
+        "notario": "TEST",
         "numero_escritura": 123,
-        "fecha_documento": "5 de mayo de 2023",
-        "numero_notaria": "45",
-        "municipio": "Tepic, Nayarit",
-        "nombre_notario": "RIGOBERTO OCHOA TORRES",
         "tipo_titular": "empresa",
         "titulares": [
             {"nombre": "Empresa Test", "actua_por": "representación"}
         ]
     }
-
+    
     escritura = validar_json_flexible(json_prueba)
     reporte = escritura.generar_reporte()
-
-    print(f"\nCampos encontrados: {reporte['resumen']['campos_encontrados']}/9")
-    print(f"Porcentaje: {reporte['resumen']['porcentaje_exito']}%")
+    
+    print(f"\n📊 Campos encontrados: {reporte['resumen']['campos_encontrados']}/8")
+    print(f"📊 Porcentaje: {reporte['resumen']['porcentaje_exito']}%")

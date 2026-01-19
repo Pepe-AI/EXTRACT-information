@@ -1094,16 +1094,17 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
             "fecha_documento": str | None,
             "monto_operacion": str | None,
             "municipio": str | None,
+            "rfcs": List[str],
             "curps": List[str],
         }
     """
-
+    
     return {
         # Campos principales
         "numero_escritura": extraer_numero_escritura(texto),
         "fecha_documento": extraer_fecha_documento(texto),
         "monto_operacion": extraer_monto_operacion(texto),
-
+        
         # Campos de notaría
         "numero_notaria": extraer_numero_notaria(texto),
         "nombre_notario": extraer_nombre_notario(texto),
@@ -1112,6 +1113,7 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
         "municipio": extraer_municipio(texto),
 
         # Listas de identificadores
+        "rfcs": extraer_rfc_todos(texto),
         "curps": extraer_curp_todos(texto),
     }
 

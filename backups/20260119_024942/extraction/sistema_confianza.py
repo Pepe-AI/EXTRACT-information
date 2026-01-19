@@ -94,7 +94,7 @@ class SistemaConfianza:
         """
         for nombre, valor in datos_regex.items():
             # Manejar listas especiales
-            if nombre in ["curps"]:
+            if nombre in ["rfcs", "curps"]:
                 self._listas[nombre] = valor if isinstance(valor, list) else []
                 continue
             
