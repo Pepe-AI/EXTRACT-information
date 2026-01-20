@@ -17,7 +17,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.escritura import (
     # Modelos estrictos
     EscrituraPublica,
-    Notario,
     Titular,
     Adquiriente,
     Representante,
@@ -27,7 +26,7 @@ from models.escritura import (
     TitularFlexible,
     AdquirienteFlexible,
     RepresentanteFlexible,
-    
+
     # Funciones
     validar_json_flexible,
     generar_feedback_error,
@@ -44,17 +43,11 @@ def test_modelo_estricto_completo():
     print("="*60)
     
     escritura = EscrituraPublica(
-        notario=[
-            Notario(
-                nombre="Lic. Roberto García",
-                numero_notario="45",
-                municipio="Ciudad de México",
-                escritura="3125",
-                fecha_documento="15 de mayo de 2024"
-            )
-        ],
         numero_escritura=3125,
         fecha_documento="15 de mayo de 2024",
+        numero_notaria="45",
+        municipio="Ciudad de México",
+        nombre_notario="Lic. Roberto García",
         tipo_titular="empresa",
         titulares=[
             Titular(
@@ -80,12 +73,12 @@ def test_modelo_estricto_completo():
         ],
         monto_operacion="$1,500,000.00"
     )
-    
+
     print(f"\n✅ Escritura creada exitosamente")
-    print(f"   Notario: {escritura.notario}")
+    print(f"   Notario: {escritura.nombre_notario}")
     print(f"   Número: {escritura.numero_escritura}")
-    
-    assert escritura.notario == "Lic. Roberto García"
+
+    assert escritura.nombre_notario == "Lic. Roberto García"
     assert escritura.numero_escritura == 3125
 
 
@@ -94,10 +87,10 @@ def test_modelo_estricto_falla_sin_campos():
     print("\n" + "="*60)
     print("PRUEBA 2: Modelo ESTRICTO falla sin campos")
     print("="*60)
-    
+
     try:
         escritura = EscrituraPublica(
-            notario="Lic. Test"
+            nombre_notario="Lic. Test"
             # Faltan campos obligatorios
         )
         print("❌ Debería haber fallado")
@@ -111,18 +104,18 @@ def test_modelo_flexible_acepta_incompleto():
     print("\n" + "="*60)
     print("PRUEBA 3: Modelo FLEXIBLE acepta incompleto")
     print("="*60)
-    
+
     # Solo algunos campos
     escritura = EscrituraPublicaFlexible(
-        notario="Lic. María López",
+        nombre_notario="Lic. María López",
         numero_escritura=1000
     )
     
     print(f"\n✅ Escritura flexible creada")
-    print(f"   Notario: {escritura.notario}")
+    print(f"   Notario: {escritura.nombre_notario}")
     print(f"   Monto: {escritura.monto_operacion}")  # Debería ser NO_ENCONTRADO
-    
-    assert escritura.notario == "Lic. María López"
+
+    assert escritura.nombre_notario == "Lic. María López"
     assert escritura.monto_operacion == NO_ENCONTRADO
 
 
@@ -159,7 +152,7 @@ def test_generar_reporte():
     print("="*60)
     
     json_parcial = {
-        "notario": "Lic. Test",
+        "nombre_notario": "Lic. Test",
         "numero_escritura": 123,
         "titulares": [{"nombre": "Empresa X", "actua_por": "derecho propio"}]
     }

@@ -8,22 +8,20 @@ from .escritura import (
     Titular,
     Adquiriente,
     Representante,
-    Notario,  # NUEVO - Modelo estricto de notario
-    
+
     # Modelos flexibles
     EscrituraPublicaFlexible,
     TitularFlexible,
     AdquirienteFlexible,
     RepresentanteFlexible,
-    NotarioFlexible,  # NUEVO - Modelo flexible de notario
-    
+
     # Respuesta de extracción
     ExtractionResponse,
-    
+
     # Enums y constantes
     TipoTitular,
     NO_ENCONTRADO,
-    
+
     # Funciones auxiliares
     get_campos_obligatorios,
     get_campos_no_obligatorios,
@@ -38,19 +36,20 @@ __all__ = [
     'Titular',
     'Adquiriente',
     'Representante',
-    'Notario',  # NUEVO
-    
+
     # Modelos flexibles
     'EscrituraPublicaFlexible',
     'TitularFlexible',
     'AdquirienteFlexible',
     'RepresentanteFlexible',
-    'NotarioFlexible',  # NUEVO
-    
+
+    # Respuesta de extracción
+    'ExtractionResponse',
+
     # Enums y constantes
     'TipoTitular',
     'NO_ENCONTRADO',
-    
+
     # Funciones auxiliares
     'get_campos_obligatorios',
     'get_campos_no_obligatorios',
