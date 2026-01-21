@@ -90,7 +90,7 @@ def _recuperar_datos_estructura_alternativa(json_data: dict) -> dict:
         >>> entrada = {"Documento": {"Partes": {"Vendedor": "INSUS"}}}
         >>> salida = _recuperar_datos_estructura_alternativa(entrada)
         >>> print(salida.get("titulares"))
-        [{"nombre": "INSUS", "actua_por": null, "representante": None}]
+        [{"nombre": "INSUS", "actua_por": None, "representante": None}]
     """
     
     # Si ya tiene la estructura correcta, retornar sin cambios
@@ -376,7 +376,7 @@ EJEMPLO_JSON_EMPRESA = {
             "representante": {
                 "nombre": "Ernesto Padilla Aceves",
                 "en_calidad": "Representante Regional",
-                "escritura": null,
+                "escritura": None,
                 "bis": False,
                 "fecha_poder": "5 de mayo de 2023"
             }
