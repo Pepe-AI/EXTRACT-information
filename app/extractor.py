@@ -764,7 +764,29 @@ class EscrituraExtractor:
         Returns:
             JSON con tipos asignados donde faltaban
         """
-        from utils.clasificador import detectar_tipo_por_nombre
+        import re
+
+        # Patrones de empresa (movidos de clasificador.py)
+        PATRONES_EMPRESA = [
+            r'\bS\.?A\.?(\s+DE\s+C\.?V\.?)?',
+            r'\bS\.?R\.?L\.?(\s+DE\s+C\.?V\.?)?',
+            r'\bS\.?C\.?(\s+DE\s+C\.?V\.?)?',
+            r'\bCÍA\.?',
+            r'\bCOMPAÑÍA',
+            r'\bCORPORACIÓN',
+            r'\bGRUPO\s+',
+            r'\bASSOCIATES?\b',
+        ]
+
+        def detectar_tipo_por_nombre(nombre: str) -> str:
+            """Detecta si nombre es empresa o persona por regex."""
+            if not nombre:
+                return "persona"
+            nombre_upper = nombre.upper()
+            for patron in PATRONES_EMPRESA:
+                if re.search(patron, nombre_upper, re.IGNORECASE):
+                    return "empresa"
+            return "persona"
 
         # Procesar titulares
         titulares = json_data.get('titulares', [])
@@ -774,12 +796,12 @@ class EscrituraExtractor:
 
             if titular.get('tipo') is None:
                 nombre = titular.get('nombre', '')
-                tipo_detectado, patrones = detectar_tipo_por_nombre(nombre)
+                tipo_detectado = detectar_tipo_por_nombre(nombre)
 
                 if tipo_detectado in ['empresa', 'persona']:
                     titular['tipo'] = tipo_detectado
                     print(f"\n   🔧 FALLBACK: Titular {i+1} clasificado como '{tipo_detectado}'")
-                    print(f"      Razón: '{nombre[:40]}...' ({', '.join(patrones[:2]) if patrones else 'patrón de nombre'})")
+                    print(f"      Razón: '{nombre[:40]}...' (patrón de nombre)")
 
         # Procesar adquirientes
         adquirientes = json_data.get('adquirientes', [])
@@ -789,12 +811,12 @@ class EscrituraExtractor:
 
             if adquiriente.get('tipo') is None:
                 nombre = adquiriente.get('nombre', '')
-                tipo_detectado, patrones = detectar_tipo_por_nombre(nombre)
+                tipo_detectado = detectar_tipo_por_nombre(nombre)
 
                 if tipo_detectado in ['empresa', 'persona']:
                     adquiriente['tipo'] = tipo_detectado
                     print(f"\n   🔧 FALLBACK: Adquiriente {i+1} clasificado como '{tipo_detectado}'")
-                    print(f"      Razón: '{nombre[:40]}...' ({', '.join(patrones[:2]) if patrones else 'patrón de nombre'})")
+                    print(f"      Razón: '{nombre[:40]}...' (patrón de nombre)")
 
         return json_data
     
