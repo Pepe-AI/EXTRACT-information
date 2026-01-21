@@ -5,7 +5,8 @@
       "Bash(python -m tests.test_01_escritura:*)",
       "Bash(iconv:*)",
       "Bash(python:*)",
-      "Bash(Get-Date -Format \"yyyyMMdd_HHmmss\")"
+      "Bash(Get-Date -Format \"yyyyMMdd_HHmmss\")",
+      "Bash(git checkout:*)"
     ]
   }
 }

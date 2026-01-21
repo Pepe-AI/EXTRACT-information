@@ -102,7 +102,6 @@ CAMPOS_TOTALES = [
     "numero_notaria",
     "nombre_notario",
     "fecha_documento",
-    "tipo_titular",
     "titulares",
     "adquirientes",
     "monto_operacion"

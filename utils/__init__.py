@@ -4,7 +4,6 @@ utils/__init__.py - Exporta utilidades del paquete
 Contiene:
 - text_processing: Limpieza de texto OCR y procesamiento de respuestas
 - prompt_builder: Construcción de prompts para DeepSeek
-- clasificador: Clasificación de documentos (Fase 1 del sistema híbrido)
 """
 
 from .text_processing import (
@@ -38,13 +37,6 @@ from .prompt_builder import (
     limpiar_json_extra,  # NUEVO: Limpieza de campos extra
 )
 
-from .clasificador import (
-    clasificar_documento,
-    ResultadoClasificacion,
-    detectar_tipo_por_nombre,
-    validar_representante_no_es_institucion,
-)
-
 __all__ = [
     # text_processing
     'extract_think_block',
@@ -65,10 +57,4 @@ __all__ = [
     'build_validation_prompt',
     'estimate_tokens',
     'limpiar_json_extra',  # NUEVO
-    
-    # clasificador (NUEVO)
-    'clasificar_documento',
-    'ResultadoClasificacion',
-    'detectar_tipo_por_nombre',
-    'validar_representante_no_es_institucion',
 ]

@@ -37,7 +37,7 @@ CAMPOS_RAIZ_PERMITIDOS = {
 }
 
 CAMPOS_TITULAR_PERMITIDOS = {
-    "nombre", "actua_por", "representante"
+    "nombre", "tipo", "actua_por", "representante"
 }
 
 CAMPOS_REPRESENTANTE_PERMITIDOS = {
@@ -45,7 +45,7 @@ CAMPOS_REPRESENTANTE_PERMITIDOS = {
 }
 
 CAMPOS_ADQUIRIENTE_PERMITIDOS = {
-    "nombre", "actua_por", "estado_civil", "tipo_sociedad", "edad", "rfc", "curp", "representante"
+    "nombre", "tipo", "actua_por", "estado_civil", "tipo_sociedad", "edad", "rfc", "curp", "representante"
 }
 
 
@@ -367,10 +367,11 @@ EJEMPLO_JSON_EMPRESA = {
     "numero_notaria": "45",
     "municipio": "Tepic, Nayarit",
     "nombre_notario": "RIGOBERTO OCHOA TORRES",
-    "tipo_titular": "empresa",
+    "tipo_titular": None,  # DEPRECATED: usar campo 'tipo' individual
     "titulares": [
         {
             "nombre": "Instituto Nacional del Suelo Sustentable (INSUS)",
+            "tipo": "empresa",
             "actua_por": "representación",
             "representante": {
                 "nombre": "Ernesto Padilla Aceves",
@@ -384,6 +385,7 @@ EJEMPLO_JSON_EMPRESA = {
     "adquirientes": [
         {
             "nombre": "Angelita Pérez Soto",
+            "tipo": "persona",
             "actua_por": "derecho propio",
             "estado_civil": "casada",
             "tipo_sociedad": None,
@@ -404,10 +406,11 @@ EJEMPLO_JSON_EMPRESA_2 = {
     "numero_notaria": "123",
     "municipio": "Guadalajara, Jalisco",
     "nombre_notario": "FERNANDO CASTRO RUBIO",
-    "tipo_titular": "empresa",
+    "tipo_titular": None,  # DEPRECATED: usar campo 'tipo' individual
     "titulares": [
         {
             "nombre": "KUBBOX ARQUITECTURA, SOCIEDAD ANONIMA DE CAPITAL VARIABLE",
+            "tipo": "empresa",
             "actua_por": "apoderado",
             "representante": {
                 "nombre": "ROSA HERLINDA DURAN GEBBIA",
@@ -421,6 +424,7 @@ EJEMPLO_JSON_EMPRESA_2 = {
     "adquirientes": [
         {
             "nombre": "BEATRIZ PICHARDO MENDOZA",
+            "tipo": "persona",
             "actua_por": "derecho propio",
             "estado_civil": "casada",
             "tipo_sociedad": "separación de bienes",
@@ -441,10 +445,11 @@ EJEMPLO_JSON_PERSONA = {
     "numero_notaria": "78",
     "municipio": "Ciudad de México",
     "nombre_notario": "María López Hernández",
-    "tipo_titular": "persona",
+    "tipo_titular": None,  # DEPRECATED: usar campo 'tipo' individual
     "titulares": [
         {
             "nombre": "Juan Carlos Pérez García",
+            "tipo": "persona",
             "actua_por": "derecho propio",
             "representante": None
         }
@@ -452,6 +457,7 @@ EJEMPLO_JSON_PERSONA = {
     "adquirientes": [
         {
             "nombre": "Ana María Rodríguez López",
+            "tipo": "persona",
             "actua_por": "derecho propio",
             "estado_civil": "soltera",
             "tipo_sociedad": None,
@@ -508,335 +514,21 @@ SYSTEM_PROMPT_EXTRACCION = SYSTEM_PROMPT_ESTRICTO
 
 def build_extraction_prompt(
     document_text: str,
-    tipo_titular: str = None,
-    nombre_titular: str = None,
-    nombre_representante: str = None,
     include_examples: bool = True
 ) -> Tuple[str, str]:
     """
-    Construye el prompt de extracción con estructura ESTRICTA.
-    
+    Construye el prompt de extracción genérico sin clasificación previa.
+
+    El LLM determinará el tipo de cada titular/adquiriente individualmente.
+
     Args:
         document_text: Texto del documento a procesar
-        tipo_titular: "empresa" o "persona" (de clasificación previa)
-        nombre_titular: Nombre del titular identificado
-        nombre_representante: Nombre del representante identificado
         include_examples: Si incluir ejemplos
-        
+
     Returns:
         Tupla (system_prompt, user_prompt)
     """
-    
-    if tipo_titular == "empresa":
-        return _build_prompt_empresa(
-            document_text, nombre_titular, nombre_representante, include_examples
-        )
-    elif tipo_titular == "persona":
-        return _build_prompt_persona(
-            document_text, nombre_titular, nombre_representante, include_examples
-        )
-    else:
-        return _build_prompt_generico(document_text, include_examples)
-
-
-def _build_prompt_empresa(
-    document_text: str,
-    nombre_titular: str = None,
-    nombre_representante: str = None,
-    include_examples: bool = True
-) -> Tuple[str, str]:
-    """
-    Prompt ESTRICTO para extracción de EMPRESA/INSTITUCIÓN.
-    
-    IMPORTANTE: Las empresas/instituciones SIEMPRE deben tener representante.
-    """
-    
-    user_prompt = """
-╔══════════════════════════════════════════════════════════════════╗
-║                    EXTRACCIÓN DE ESCRITURA                       ║
-║                    TIPO: EMPRESA/INSTITUCIÓN                     ║
-╚══════════════════════════════════════════════════════════════════╝
-
-⚠️ INSTRUCCIONES CRÍTICAS - LEE CON ATENCIÓN:
-==============================================
-1. Extrae SOLO los 9 campos que aparecen en la plantilla
-2. NO inventes campos adicionales
-3. NO crees estructuras como "documento", "inmueble", "firmas", "partes"
-4. El "representante" es un OBJETO con 5 campos, NO un campo string separado
-5. EMPRESA = SIEMPRE tiene representante (es obligatorio)
-
-"""
-
-    # Agregar información confirmada si existe
-    if nombre_titular or nombre_representante:
-        user_prompt += """
-✅ INFORMACIÓN YA IDENTIFICADA (ÚSALA):
-=======================================
-"""
-        if nombre_titular:
-            user_prompt += f"• Titular (empresa/institución): {nombre_titular}\n"
-        if nombre_representante:
-            user_prompt += f"• Representante (persona física que firma): {nombre_representante}\n"
-        user_prompt += "\n"
-
-    # Plantilla EXACTA
-    user_prompt += """
-📋 PLANTILLA JSON - USA EXACTAMENTE ESTA ESTRUCTURA:
-====================================================
-
-{
-    "numero_escritura": 1234,
-    "fecha_documento": "día de mes de año",
-    "numero_notaria": "45",
-    "municipio": "CIUDAD, ESTADO",
-    "nombre_notario": "NOMBRE COMPLETO DEL NOTARIO",
-    "tipo_titular": "empresa",
-    "titulares": [
-        {
-            "nombre": "RAZÓN SOCIAL DE LA EMPRESA O INSTITUCIÓN",
-            "actua_por": "representación",
-            "representante": {
-                "nombre": "NOMBRE DE LA PERSONA QUE FIRMA",
-                "en_calidad": "apoderado/representante legal/etc",
-                "escritura": "número de escritura del poder o NO SE ENCONTRÓ DATO",
-                "bis": false,
-                "fecha_poder": "fecha del poder o NO SE ENCONTRÓ DATO"
-            }
-        }
-    ],
-    "adquirientes": [
-        {
-            "nombre": "NOMBRE DEL COMPRADOR",
-            "actua_por": "derecho propio o representación",
-            "estado_civil": "soltero/casado/etc",
-            "tipo_sociedad": null,
-            "edad": null,
-            "rfc": "RFC123..." o false,
-            "curp": "CURP123..." o false,
-            "representante": null
-        }
-    ],
-    "monto_operacion": "$X,XXX.XX",
-    "valor_catastral": "$X,XXX.XX" o null,
-    "curps": []
-}
-
-"""
-
-    if include_examples:
-        user_prompt += f"""
-📌 EJEMPLO 1 - INSTITUCIÓN GUBERNAMENTAL:
-=========================================
-
-```json
-{json.dumps(EJEMPLO_JSON_EMPRESA, indent=4, ensure_ascii=False)}
-```
-
-📌 EJEMPLO 2 - SOCIEDAD ANÓNIMA:
-================================
-
-```json
-{json.dumps(EJEMPLO_JSON_EMPRESA_2, indent=4, ensure_ascii=False)}
-```
-
-"""
-
-    user_prompt += """
-❌ ERRORES COMUNES QUE DEBES EVITAR:
-====================================
-
-ERROR 1 - Campo "representante_legal" separado:
------------------------------------------------
-❌ INCORRECTO:
-{
-    "titulares": [{
-        "nombre": "Instituto...",
-        "representante": null,
-        "representante_legal": "Ernesto..."
-    }]
-}
-
-✅ CORRECTO:
-{
-    "titulares": [{
-        "nombre": "Instituto...",
-        "representante": {
-            "nombre": "Ernesto...",
-            "en_calidad": "...",
-            "escritura": "...",
-            "bis": false,
-            "fecha_poder": "..."
-        }
-    }]
-}
-
-ERROR 2 - Agregar estructura "documento":
------------------------------------------
-❌ INCORRECTO:
-{
-    "notario": "...",
-    "documento": {
-        "inmueble": {...},
-        "firmas": {...}
-    }
-}
-
-✅ CORRECTO:
-{
-    "notario": "...",
-    "numero_escritura": 123,
-    ... (solo 9 campos en raíz)
-}
-
-"""
-
-    user_prompt += f"""
-📄 DOCUMENTO A ANALIZAR:
-========================
-
-{document_text}
-
-══════════════════════════════════════════════════════════════════
-🎯 RESPONDE SOLO CON EL JSON.
-🚫 NO AGREGUES TEXTO ANTES NI DESPUÉS DEL JSON.
-🚫 NO AGREGUES CAMPOS QUE NO ESTÉN EN LA PLANTILLA.
-══════════════════════════════════════════════════════════════════
-"""
-
-    return SYSTEM_PROMPT_ESTRICTO, user_prompt
-
-
-def _build_prompt_persona(
-    document_text: str,
-    nombre_titular: str = None,
-    nombre_representante: str = None,
-    include_examples: bool = True
-) -> Tuple[str, str]:
-    """
-    Prompt ESTRICTO para extracción de PERSONA FÍSICA.
-    
-    IMPORTANTE: Para persona física, el representante es OPCIONAL.
-    - Si actúa por derecho propio → representante: null
-    - Si tiene apoderado → representante: {objeto}
-    """
-    
-    user_prompt = """
-╔══════════════════════════════════════════════════════════════════╗
-║                    EXTRACCIÓN DE ESCRITURA                       ║
-║                    TIPO: PERSONA FÍSICA                          ║
-╚══════════════════════════════════════════════════════════════════╝
-
-⚠️ INSTRUCCIONES CRÍTICAS:
-==========================
-1. Extrae SOLO los 9 campos de la plantilla
-2. NO inventes campos adicionales
-3. Para PERSONA FÍSICA, "representante" puede ser:
-   - null (si actúa por derecho propio)
-   - un objeto (si tiene apoderado)
-4. NO crees estructuras como "documento", "inmueble", "firmas"
-
-"""
-
-    if nombre_titular:
-        user_prompt += f"""
-✅ INFORMACIÓN YA IDENTIFICADA:
-===============================
-• Titular (persona física): {nombre_titular}
-"""
-        if nombre_representante:
-            user_prompt += f"• Representante/Apoderado: {nombre_representante}\n"
-        user_prompt += "\n"
-
-    user_prompt += """
-📋 PLANTILLA - PERSONA SIN APODERADO (actúa por derecho propio):
-================================================================
-
-{
-    "numero_escritura": 1234,
-    "fecha_documento": "día de mes de año",
-    "numero_notaria": "45",
-    "municipio": "CIUDAD, ESTADO",
-    "nombre_notario": "NOMBRE DEL NOTARIO",
-    "tipo_titular": "persona",
-    "titulares": [
-        {
-            "nombre": "NOMBRE DE LA PERSONA",
-            "actua_por": "derecho propio",
-            "representante": null
-        }
-    ],
-    "adquirientes": [
-        {
-            "nombre": "NOMBRE DEL COMPRADOR",
-            "actua_por": "derecho propio",
-            "estado_civil": "soltero/casado/etc",
-            "tipo_sociedad": null,
-            "edad": null,
-            "rfc": false,
-            "curp": false,
-            "representante": null
-        }
-    ],
-    "monto_operacion": "$X,XXX.XX",
-    "valor_catastral": null,
-    "curps": []
-}
-
-📋 PLANTILLA - PERSONA CON APODERADO:
-=====================================
-
-{
-    "numero_escritura": 1234,
-    "fecha_documento": "día de mes de año",
-    "numero_notaria": "78",
-    "municipio": "CIUDAD, ESTADO",
-    "nombre_notario": "NOMBRE DEL NOTARIO",
-    "tipo_titular": "persona",
-    "titulares": [
-        {
-            "nombre": "NOMBRE DE LA PERSONA",
-            "actua_por": "representación",
-            "representante": {
-                "nombre": "NOMBRE DEL APODERADO",
-                "en_calidad": "apoderado",
-                "escritura": "número",
-                "bis": false,
-                "fecha_poder": "fecha"
-            }
-        }
-    ],
-    "adquirientes": [...],
-    "monto_operacion": "$X,XXX.XX",
-    "valor_catastral": null,
-    "curps": []
-}
-
-"""
-
-    if include_examples:
-        user_prompt += f"""
-📌 EJEMPLO - PERSONA SIN APODERADO:
-===================================
-
-```json
-{json.dumps(EJEMPLO_JSON_PERSONA, indent=4, ensure_ascii=False)}
-```
-
-"""
-
-    user_prompt += f"""
-📄 DOCUMENTO A ANALIZAR:
-========================
-
-{document_text}
-
-══════════════════════════════════════════════════════════════════
-🎯 RESPONDE SOLO CON EL JSON.
-🚫 NO AGREGUES CAMPOS QUE NO ESTÉN EN LA PLANTILLA.
-══════════════════════════════════════════════════════════════════
-"""
-
-    return SYSTEM_PROMPT_ESTRICTO, user_prompt
+    return _build_prompt_generico(document_text, include_examples)
 
 
 def _build_prompt_generico(
@@ -852,11 +544,21 @@ def _build_prompt_generico(
 ║                    EXTRACCIÓN DE ESCRITURA                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-INSTRUCCIONES:
-==============
-1. Determina si el titular es EMPRESA o PERSONA
-2. Extrae SOLO los 9 campos de la plantilla
-3. NO agregues campos adicionales
+INSTRUCCIONES IMPORTANTES SOBRE CLASIFICACIÓN:
+==============================================
+
+CAMPO "tipo" EN TITULARES Y ADQUIRIENTES:
+- Cada titular/adquiriente DEBE tener campo "tipo": "empresa" o "persona"
+- Si es EMPRESA/INSTITUCIÓN (S.A., S.C., Instituto, Gobierno, etc.):
+  * tipo: "empresa"
+  * DEBE tener representante (persona física que firma)
+- Si es PERSONA FÍSICA (actúa por sí misma):
+  * tipo: "persona"
+  * representante es OPCIONAL (solo si tiene apoderado)
+
+# NOTA: Esta instrucción puede eliminarse en el futuro para que el LLM
+# extraiga libremente y la validación se haga post-extracción con regex.
+# Por ahora, dejamos esta guía para ayudar al LLM.
 
 PLANTILLA JSON (campos obligatorios):
 ======================================
@@ -867,10 +569,11 @@ PLANTILLA JSON (campos obligatorios):
     "numero_notaria": "45",
     "municipio": "CIUDAD, ESTADO",
     "nombre_notario": "NOMBRE DEL NOTARIO",
-    "tipo_titular": "empresa" o "persona",
+    "tipo_titular": null,  // DEPRECATED: ignorar
     "titulares": [
         {
             "nombre": "NOMBRE",
+            "tipo": "empresa" o "persona",
             "actua_por": "representación" o "derecho propio",
             "representante": null o {nombre, en_calidad, escritura, bis, fecha_poder}
         }
@@ -878,13 +581,14 @@ PLANTILLA JSON (campos obligatorios):
     "adquirientes": [
         {
             "nombre": "NOMBRE",
+            "tipo": "empresa" o "persona",
             "actua_por": "derecho propio" o "representación",
             "estado_civil": "estado",
             "tipo_sociedad": null,
             "edad": null,
             "rfc": false,
             "curp": false,
-            "representante": null
+            "representante": null o {objeto}
         }
     ],
     "monto_operacion": "$X,XXX.XX",
@@ -893,8 +597,8 @@ PLANTILLA JSON (campos obligatorios):
 }
 
 REGLAS:
-- Si es EMPRESA → representante es OBLIGATORIO (objeto)
-- Si es PERSONA → representante es OPCIONAL (null o objeto)
+- Si titular/adquiriente es EMPRESA → representante es OBLIGATORIO
+- Si titular/adquiriente es PERSONA → representante es OPCIONAL
 
 """
 

@@ -108,12 +108,6 @@ from utils.prompt_builder import (
     estimate_tokens,
     limpiar_json_extra,
 )
-from utils.clasificador import (
-    clasificar_documento,
-    ResultadoClasificacion,
-    detectar_tipo_por_nombre,
-    validar_representante_no_es_institucion,
-)
 
 # =============================================================================
 # MODELOS EXISTENTES
@@ -387,10 +381,7 @@ class EscrituraExtractor:
             print(f"\n🤖 Paso 4: FASE 2 - Extrayendo datos con LLM...")
             
             json_data, intentos, validacion_estricta, thinking = self._fase2_extraer(
-                document_text=formatted_text,
-                tipo_titular=tipo_titular,
-                nombre_titular=nombre_titular,
-                nombre_representante=nombre_representante
+                document_text=formatted_text
             )
             
             result.intentos_realizados = intentos
@@ -398,7 +389,14 @@ class EscrituraExtractor:
             result.raw_json = json_data
             result.thinking = thinking
             result.model_used = self.ollama_service.config.model
-            
+
+            # =================================================================
+            # PASO 4.5: APLICAR CLASIFICACIÓN FALLBACK
+            # =================================================================
+            if json_data:
+                print(f"\n🔍 Paso 4.5: Aplicando clasificación fallback...")
+                json_data = self._aplicar_clasificacion_fallback(json_data)
+
             # =================================================================
             # PASO 5: SEGMENTACIÓN DEL DOCUMENTO (Plan D)
             # =================================================================
@@ -465,8 +463,6 @@ class EscrituraExtractor:
             sistema.agregar_regex(datos_regex)
             
             if json_data:
-                # Validar consistencia del tipo_titular con regex
-                json_data = self._validar_y_corregir_tipo(json_data, tipo_titular)
                 sistema.agregar_llm(json_data)
             
             sistema.aplicar_validacion(validaciones)
@@ -619,26 +615,20 @@ class EscrituraExtractor:
     
     def _fase2_extraer(
         self,
-        document_text: str,
-        tipo_titular: str = None,
-        nombre_titular: str = None,
-        nombre_representante: str = None
+        document_text: str
     ) -> Tuple[Optional[Dict], int, bool, Optional[str]]:
         """
-        FASE 2: Extracción con prompt específico y sistema de retry.
-        
+        FASE 2: Extracción con prompt genérico y sistema de retry.
+
         Esta función:
-        1. Construye el prompt con la clasificación previa
+        1. Construye el prompt genérico
         2. Envía a DeepSeek para extracción
         3. Valida la respuesta
         4. Si falla, reintenta con feedback
-        
+
         Args:
             document_text: Texto del documento (ya formateado)
-            tipo_titular: "empresa" o "persona" (de Fase 1)
-            nombre_titular: Nombre del titular identificado
-            nombre_representante: Nombre del representante identificado
-            
+
         Returns:
             Tupla de (json_data, intentos_usados, paso_validacion_estricta, thinking)
         """
@@ -654,24 +644,18 @@ class EscrituraExtractor:
             try:
                 # Construir prompt
                 if attempt == 0:
-                    # Primer intento: prompt con clasificación
+                    # Primer intento: prompt genérico
                     system_prompt, user_prompt = build_extraction_prompt(
                         document_text=document_text,
-                        tipo_titular=tipo_titular,
-                        nombre_titular=nombre_titular,
-                        nombre_representante=nombre_representante,
                         include_examples=self.config.include_examples
                     )
-                    print(f"      📝 Prompt específico para: {tipo_titular or 'genérico'}")
+                    print(f"      📝 Prompt genérico (clasificación individual por titular/adquiriente)")
                 else:
                     # Retry: prompt de corrección
                     system_prompt, user_prompt = build_validation_prompt(
                         json_anterior=last_json,
                         error_validacion=str(last_error),
-                        document_text=document_text[:2000],  # Truncar para retry
-                        tipo_titular=tipo_titular,
-                        nombre_titular=nombre_titular,
-                        nombre_representante=nombre_representante
+                        document_text=document_text[:2000]  # Truncar para retry
                     )
                     print(f"      📝 Prompt de corrección con feedback")
                 
@@ -729,13 +713,7 @@ class EscrituraExtractor:
                 
                 # Guardar para siguiente intento
                 last_json = json_data
-                
-                # Forzar tipo_titular de la clasificación si existe
-                if tipo_titular:
-                    if json_data.get('tipo_titular') != tipo_titular:
-                        print(f"      🔧 Corrigiendo tipo_titular: {json_data.get('tipo_titular')} → {tipo_titular}")
-                    json_data['tipo_titular'] = tipo_titular
-                
+
                 # Intentar validación estricta
                 try:
                     EscrituraPublica.model_validate(json_data)
@@ -755,7 +733,7 @@ class EscrituraExtractor:
                     print(f"         {e}")
                     
                     # Mostrar análisis del JSON
-                    analisis = analizar_json_parcial(json_data, tipo_titular)
+                    analisis = analizar_json_parcial(json_data)
                     print(f"      📊 Porcentaje completo: {analisis['porcentaje']}%")
                     if analisis.get('campos_faltantes'):
                         print(f"      ❌ Faltan: {', '.join(analisis['campos_faltantes'][:3])}")
@@ -773,56 +751,51 @@ class EscrituraExtractor:
         thinking_final = "\n---\n".join(all_thinking) if all_thinking else None
         return json_data, self.config.max_retries, False, thinking_final
     
-    def _validar_y_corregir_tipo(
-        self,
-        json_data: Dict[str, Any],
-        tipo_clasificado: str = None
-    ) -> Dict[str, Any]:
+    def _aplicar_clasificacion_fallback(self, json_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Valida y corrige inconsistencias en el tipo_titular.
-        
-        Esta función actúa como "última línea de defensa" usando
-        regex para detectar y corregir errores que el LLM pudo cometer.
-        
+        Aplica clasificación fallback por regex cuando el campo 'tipo' es None.
+
+        Esta función detecta si un titular/adquiriente es empresa o persona
+        usando patrones regex cuando el LLM no asignó el tipo.
+
         Args:
-            json_data: JSON extraído
-            tipo_clasificado: Tipo de la clasificación previa
-            
+            json_data: JSON extraído con datos de titulares/adquirientes
+
         Returns:
-            JSON corregido (si hubo correcciones)
+            JSON con tipos asignados donde faltaban
         """
-        
-        tipo_json = json_data.get('tipo_titular', '')
+        from utils.clasificador import detectar_tipo_por_nombre
+
+        # Procesar titulares
         titulares = json_data.get('titulares', [])
-        
         for i, titular in enumerate(titulares):
             if not isinstance(titular, dict):
                 continue
-            
-            nombre = titular.get('nombre', '')
-            representante = titular.get('representante')
-            
-            # Verificar si el nombre del titular es una institución
-            tipo_detectado, patrones = detectar_tipo_por_nombre(nombre)
-            
-            if tipo_detectado == "empresa" and tipo_json == "persona":
-                print(f"\n   🔧 POST-CORRECCIÓN: Cambiando tipo_titular a 'empresa'")
-                print(f"      Razón: '{nombre[:40]}...' parece empresa ({', '.join(patrones[:2])})")
-                json_data['tipo_titular'] = "empresa"
-            
-            # Verificar si el representante es una institución (error grave)
-            if representante and isinstance(representante, dict):
-                nombre_rep = representante.get('nombre', '')
-                tipo_rep, patrones_rep = detectar_tipo_por_nombre(nombre_rep)
-                
-                if tipo_rep == "empresa":
-                    print(f"\n   🔧 POST-CORRECCIÓN: Intercambiando titular ↔ representante")
-                    print(f"      Razón: El representante '{nombre_rep[:30]}...' parece institución")
-                    
-                    # Intercambiar: el "representante" es el titular real
-                    titular['nombre'], representante['nombre'] = representante['nombre'], titular['nombre']
-                    json_data['tipo_titular'] = "empresa"
-        
+
+            if titular.get('tipo') is None:
+                nombre = titular.get('nombre', '')
+                tipo_detectado, patrones = detectar_tipo_por_nombre(nombre)
+
+                if tipo_detectado in ['empresa', 'persona']:
+                    titular['tipo'] = tipo_detectado
+                    print(f"\n   🔧 FALLBACK: Titular {i+1} clasificado como '{tipo_detectado}'")
+                    print(f"      Razón: '{nombre[:40]}...' ({', '.join(patrones[:2]) if patrones else 'patrón de nombre'})")
+
+        # Procesar adquirientes
+        adquirientes = json_data.get('adquirientes', [])
+        for i, adquiriente in enumerate(adquirientes):
+            if not isinstance(adquiriente, dict):
+                continue
+
+            if adquiriente.get('tipo') is None:
+                nombre = adquiriente.get('nombre', '')
+                tipo_detectado, patrones = detectar_tipo_por_nombre(nombre)
+
+                if tipo_detectado in ['empresa', 'persona']:
+                    adquiriente['tipo'] = tipo_detectado
+                    print(f"\n   🔧 FALLBACK: Adquiriente {i+1} clasificado como '{tipo_detectado}'")
+                    print(f"      Razón: '{nombre[:40]}...' ({', '.join(patrones[:2]) if patrones else 'patrón de nombre'})")
+
         return json_data
     
     def _log_resultado_final(self, result: ExtractionResult):

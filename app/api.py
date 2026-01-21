@@ -322,10 +322,11 @@ async def get_schema():
             "notario": "string - Nombre del notario",
             "numero_escritura": "integer - Número de la escritura",
             "fecha_documento": "string - Fecha del documento",
-            "tipo_titular": "string - 'empresa' o 'persona'",
+            "tipo_titular": "string | null - DEPRECATED: usar campo 'tipo' individual en titulares/adquirientes",
             "titulares": [
                 {
                     "nombre": "string - Nombre del titular",
+                    "tipo": "string - 'empresa' o 'persona'",
                     "actua_por": "string - En qué calidad actúa",
                     "representante": {
                         "nombre": "string",
@@ -333,12 +334,13 @@ async def get_schema():
                         "escritura": "string",
                         "bis": "boolean",
                         "fecha_poder": "string"
-                    }
+                    } | null
                 }
             ],
             "adquirientes": [
                 {
                     "nombre": "string - Nombre del adquiriente",
+                    "tipo": "string - 'empresa' o 'persona'",
                     "actua_por": "string - En qué calidad actúa (derecho propio o representación)",
                     "estado_civil": "string",
                     "tipo_sociedad": "string | null",

@@ -46,7 +46,6 @@ CAMPOS_POR_SECCION: Dict[str, List[str]] = {
         "estado"
     ],
     "comparecientes": [
-        "tipo_titular",
         "titulares",
         "adquirientes",
     ],
@@ -101,7 +100,6 @@ SECCION_POR_CAMPO: Dict[str, str] = {
     "nombre_notario": "encabezado",
     "fecha_documento": "encabezado",
     "municipio": "encabezado",
-    "tipo_titular": "comparecientes",
     "titulares": "comparecientes",
     "adquirientes": "comparecientes",
     "monto_operacion": "clausulas",

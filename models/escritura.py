@@ -55,11 +55,12 @@ class RepresentanteFlexible(BaseModel):
 
 class TitularFlexible(BaseModel):
     """Titular con todos los campos opcionales."""
-    
+
     nombre: Optional[str] = Field(default=NO_ENCONTRADO)
+    tipo: Optional[str] = Field(default=None, description="Tipo: 'empresa' o 'persona'")
     actua_por: Optional[str] = Field(default=NO_ENCONTRADO)
     representante: Optional[RepresentanteFlexible] = Field(default=None)
-    
+
     model_config = {"extra": "allow"}
 
 
@@ -67,6 +68,7 @@ class AdquirienteFlexible(BaseModel):
     """Adquiriente con todos los campos opcionales."""
 
     nombre: Optional[str] = Field(default=NO_ENCONTRADO)
+    tipo: Optional[str] = Field(default=None, description="Tipo: 'empresa' o 'persona'")
     actua_por: Optional[str] = Field(default=NO_ENCONTRADO)
     estado_civil: Optional[str] = Field(default=NO_ENCONTRADO)
     tipo_sociedad: Optional[str] = Field(default=None)
@@ -89,7 +91,10 @@ class EscrituraPublicaFlexible(BaseModel):
     municipio: Optional[str] = Field(default=NO_ENCONTRADO)
     nombre_notario: Optional[str] = Field(default=NO_ENCONTRADO)
 
-    tipo_titular: Optional[str] = Field(default=NO_ENCONTRADO)
+    tipo_titular: Optional[str] = Field(
+        default=NO_ENCONTRADO,
+        description="DEPRECATED: Usar campo 'tipo' individual en cada titular/adquiriente"
+    )
     titulares: Optional[List[TitularFlexible]] = Field(default_factory=list)
     adquirientes: Optional[List[AdquirienteFlexible]] = Field(default_factory=list)
     monto_operacion: Optional[str] = Field(default=NO_ENCONTRADO)
@@ -249,8 +254,9 @@ class Representante(BaseModel):
 
 class Titular(BaseModel):
     """Titular con campos obligatorios."""
-    
+
     nombre: str = Field(..., description="Nombre del titular")
+    tipo: Optional[str] = Field(default=None, description="Tipo: 'empresa' o 'persona'")
     actua_por: str = Field(..., description="En qué calidad actúa")
     representante: Optional[Representante] = Field(default=None)
 
@@ -259,6 +265,7 @@ class Adquiriente(BaseModel):
     """Adquiriente con campos obligatorios."""
 
     nombre: str = Field(..., description="Nombre del adquiriente")
+    tipo: Optional[str] = Field(default=None, description="Tipo: 'empresa' o 'persona'")
     actua_por: str = Field(..., description="En qué calidad actúa")
     estado_civil: str = Field(..., description="Estado civil")
     tipo_sociedad: Optional[str] = Field(default=None)
@@ -279,7 +286,10 @@ class EscrituraPublica(BaseModel):
     municipio: str = Field(..., description="Municipio de la notaría")
     nombre_notario: str = Field(..., description="Nombre del notario")
 
-    tipo_titular: str = Field(..., description="empresa o persona")
+    tipo_titular: Optional[str] = Field(
+        default=None,
+        description="DEPRECATED: Usar campo 'tipo' individual en cada titular/adquiriente. Valores: 'empresa' o 'persona'"
+    )
     titulares: List[Titular] = Field(..., min_length=1)
     adquirientes: List[Adquiriente] = Field(..., min_length=1)
     monto_operacion: str = Field(..., description="Monto de la operación")
@@ -296,44 +306,65 @@ class EscrituraPublica(BaseModel):
     @model_validator(mode='after')
     def validar_representantes(self):
         """
-        Valida representantes según si son empresas o personas.
+        Valida representantes según tipo individual de titular/adquiriente.
 
         REGLAS:
-        - Si tipo_titular = "empresa":
-          * TODOS los titulares DEBEN tener representante
-        - Si algún adquiriente es empresa:
-          * Ese adquiriente DEBE tener representante
-        - Si es persona (titular o adquiriente):
-          * Representante es OPCIONAL
+        - Si titular.tipo = "empresa" → DEBE tener representante (advertencia)
+        - Si titular.tipo = "persona" → representante OPCIONAL
+        - Si adquiriente.tipo = "empresa" → DEBE tener representante (advertencia)
+        - Si adquiriente.tipo = "persona" → representante OPCIONAL
+        - Si tipo = None → detectar por nombre con regex
         """
-        # Validar titulares (lógica existente)
-        if self.tipo_titular.lower() == "empresa":
-            for i, titular in enumerate(self.titulares):
-                if titular.representante is None:
-                    raise ValueError(
-                        f"Titular #{i+1} es EMPRESA y DEBE tener representante"
-                    )
+        import re
 
-        # NUEVO: Validar adquirientes
-        # Como los adquirientes pueden ser personas o empresas individualmente,
-        # necesitamos detectar si es empresa por el nombre
+        # Patrones de empresa (movidos de clasificador.py)
+        PATRONES_EMPRESA = [
+            r'\bS\.?\s*A\.?\s*(?:DE\s*)?C\.?\s*V\.?\b',
+            r'\bS\.?\s*DE\s*R\.?\s*L\.?\b',
+            r'\bS\.?\s*A\.?\s*B\.?\b',
+            r'\bS\.?\s*C\.?\b',
+            r'\bA\.?\s*C\.?\b',
+            r'\bI\.?\s*A\.?\s*P\.?\b',
+            r'\bINSTITUTO\b',
+            r'\bSECRETAR[IÍ]A\b',
+            r'\bGOBIERNO\b',
+            r'\bMUNICIPIO\b',
+            r'\bAYUNTAMIENTO\b',
+            r'\bFIDEICOMISO\b',
+            r'\bINMOBILIARIA\b',
+            r'\bCONSTRUCTORA\b',
+            r'\bSOCIEDAD\b',
+            r'\bFUNDACI[OÓ]N\b',
+            r'\bASAMBLEA\b',
+            r'\bASOCIACI[OÓ]N\b',
+        ]
+
+        def detectar_tipo_por_nombre(nombre: str) -> Optional[str]:
+            """Detecta si nombre es empresa o persona por regex."""
+            if not nombre:
+                return None
+            nombre_upper = nombre.upper()
+            for patron in PATRONES_EMPRESA:
+                if re.search(patron, nombre_upper, re.IGNORECASE):
+                    return "empresa"
+            return "persona"
+
+        # Validar titulares
+        for i, titular in enumerate(self.titulares):
+            tipo = titular.tipo or detectar_tipo_por_nombre(titular.nombre)
+
+            if tipo == "empresa" and titular.representante is None:
+                # Solo advertencia, no error estricto
+                print(f"⚠️ Advertencia: Titular #{i+1} '{titular.nombre}' "
+                      f"parece empresa pero no tiene representante")
+
+        # Validar adquirientes
         for i, adq in enumerate(self.adquirientes):
-            # Si el nombre contiene indicadores de empresa
-            indicadores_empresa = [
-                "S.A.", "S. A.", "S.A", "SA DE CV", "S DE RL",
-                "SOCIEDAD", "ASOCIACION", "INSTITUTO", "FUNDACION",
-                "S.C.", "A.C.", "I.A.P."
-            ]
+            tipo = adq.tipo or detectar_tipo_por_nombre(adq.nombre)
 
-            nombre_upper = adq.nombre.upper()
-            es_empresa = any(ind in nombre_upper for ind in indicadores_empresa)
-
-            # Si detectamos que es empresa y NO tiene representante
-            if es_empresa and adq.representante is None:
-                raise ValueError(
-                    f"Adquiriente #{i+1} '{adq.nombre}' parece ser EMPRESA "
-                    f"y DEBE tener representante"
-                )
+            if tipo == "empresa" and adq.representante is None:
+                print(f"⚠️ Advertencia: Adquiriente #{i+1} '{adq.nombre}' "
+                      f"parece empresa pero no tiene representante")
 
         return self
 
@@ -440,20 +471,19 @@ def _normalizar_titular(titular: Dict[str, Any]) -> Dict[str, Any]:
         "nombre_completo": "nombre",
         "razon_social": "nombre",
         "actua": "actua_por",
+        "tipo_titular": "tipo",  # Mapear tipo_titular a tipo individual
     }
-    
+
     resultado = {}
     for key, value in titular.items():
         key_lower = key.lower().strip()
-        if key_lower == "tipo_titular":
-            continue
         key_norm = mapeo.get(key_lower, key_lower)
-        
+
         if key_norm == "representante" and isinstance(value, str):
             value = {"nombre": value} if value.strip() else None
-        
+
         resultado[key_norm] = value
-    
+
     return resultado
 
 
@@ -464,6 +494,7 @@ def _normalizar_adquiriente(adq: Dict[str, Any]) -> Dict[str, Any]:
         "nombre_adquiriente": "nombre",
         "edo_civil": "estado_civil",
         "actua": "actua_por",
+        "tipo_adquiriente": "tipo",  # Mapear tipo_adquiriente a tipo individual
     }
 
     resultado = {}
