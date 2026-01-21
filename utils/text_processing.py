@@ -839,9 +839,23 @@ def extraer_nombre_notario(texto: str) -> Optional[str]:
     """
     
     patrones = [
+        # Patrón 1: "ante mí, Lic. NOMBRE, Notario"
         r'ante\s+m[ií],?\s+(?:(?:Lic(?:enciado)?|Dr\.?|Mtro\.?|C\.?)\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,50}?),?\s+[Nn]otario',
+
+        # Patrón 2: "NOMBRE, Notario Público número"
         r'([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{5,50}?),?\s+[Nn]otario\s+[Pp][uú]blico\s+(?:n[uú]mero|No\.?)',
+
+        # Patrón 3: "Notario: Lic. NOMBRE"
         r'[Nn]otario\s+(?:[Pp][uú]blico\s+)?[:\s]+(?:(?:Lic|Dr|Mtro)\.?\s+)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]{5,50}?)(?:\n|,|;|Notaría)',
+
+        # Patrón 4: "LIC. NOMBRE\nNOTARIO NUMERO" (multilinea)
+        r'(?:Lic(?:enciado)?|Dr|Mtro)\.?\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{10,50}?)\s*\n\s*[Nn]otario\s+(?:[Nn][uú]mero|[Nn]o\.?)',
+
+        # Patrón 5: "LICENCIADO NOMBRE, TITULAR DE LA NOTARÍA"
+        r'(?:Lic(?:enciado)?|Dr|Mtro)\.?\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{10,50}?),?\s+[Tt]itular\s+de\s+la\s+[Nn]otar[ií]a',
+
+        # Patrón 6: "Yo, LICENCIADO NOMBRE, TITULAR"
+        r'[Yy]o,\s+(?:Lic(?:enciado)?|Dr|Mtro)\.?\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s]{10,50}?),?\s+[Tt]itular',
     ]
     
     for patron in patrones:

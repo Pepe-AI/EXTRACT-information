@@ -76,7 +76,13 @@ def test_documento_real():
     # 3. Vuelve a ejecutar
 
     texto_real = """
-    PEGA AQUÍ EL TEXTO OCR DEL DOCUMENTO REAL
+MEDIA URRES . TITULAIRESN NS UNIDOS Y
+TEPIC, NAYARIT
+LIC. RIGOBERTO OCHOA TORRES
+NOTARIO NUMERO TREINTA Y CINCO
+Instrumento Público Número 2307 dos mil trescientos siete.
+Tomo Tercero. - Libro Cuarto.
+--- En la Ciudad de Tepic, Capital del Estado de Nayarit, al día 05 cinco del mes de Mayo del año 2023 dos mil veintitrés, Yo, LICENCIADO RIGOBERTO OCHOA TORRES, TITULAR DE LA NOTARÍA PÚBLICA NÚMERO 35 TREINTA Y CINCO de esta Primera Demarcación Notarial
     """
 
     if "PEGA AQUÍ" not in texto_real:
