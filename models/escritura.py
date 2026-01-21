@@ -16,7 +16,7 @@ from enum import Enum
 # CONSTANTES
 # =============================================================================
 
-NO_ENCONTRADO = "NO SE ENCONTRÓ DATO"
+NO_ENCONTRADO = None  # Valor por defecto cuando no se encuentra un dato
 
 
 # =============================================================================

@@ -27,7 +27,7 @@ from typing import Tuple, Dict, Any, Optional, List
 # CONSTANTES
 # =============================================================================
 
-NO_ENCONTRADO = "NO SE ENCONTRÓ DATO"
+NO_ENCONTRADO = None  # Valor por defecto cuando no se encuentra un dato
 
 # Campos permitidos en cada nivel (para validación y limpieza)
 CAMPOS_RAIZ_PERMITIDOS = {
@@ -90,7 +90,7 @@ def _recuperar_datos_estructura_alternativa(json_data: dict) -> dict:
         >>> entrada = {"Documento": {"Partes": {"Vendedor": "INSUS"}}}
         >>> salida = _recuperar_datos_estructura_alternativa(entrada)
         >>> print(salida.get("titulares"))
-        [{"nombre": "INSUS", "actua_por": "NO SE ENCONTRÓ DATO", "representante": None}]
+        [{"nombre": "INSUS", "actua_por": null, "representante": None}]
     """
     
     # Si ya tiene la estructura correcta, retornar sin cambios
@@ -376,7 +376,7 @@ EJEMPLO_JSON_EMPRESA = {
             "representante": {
                 "nombre": "Ernesto Padilla Aceves",
                 "en_calidad": "Representante Regional",
-                "escritura": "NO SE ENCONTRÓ DATO",
+                "escritura": null,
                 "bis": False,
                 "fecha_poder": "5 de mayo de 2023"
             }
@@ -485,7 +485,7 @@ REGLAS ABSOLUTAS QUE DEBES SEGUIR:
 2. NO agregues campos que no estén en la plantilla
 3. NO crees estructuras anidadas adicionales como "documento", "inmueble", "firmas"
 4. USA EXACTAMENTE los nombres de campos que te indico
-5. Si no encuentras un dato, usa null o "NO SE ENCONTRÓ DATO"
+5. Si no encuentras un dato, usa null (NUNCA uses strings como "NO SE ENCONTRÓ DATO" o "N/A")
 
 CAMPOS PROHIBIDOS (NUNCA LOS USES):
 - representante_legal (el representante va DENTRO del objeto "representante")
@@ -544,21 +544,27 @@ def _build_prompt_generico(
 ║                    EXTRACCIÓN DE ESCRITURA                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
-INSTRUCCIONES IMPORTANTES SOBRE CLASIFICACIÓN:
-==============================================
+INSTRUCCIONES IMPORTANTES:
+=========================
 
-CAMPO "tipo" EN TITULARES Y ADQUIRIENTES:
-- Cada titular/adquiriente DEBE tener campo "tipo": "empresa" o "persona"
-- Si es EMPRESA/INSTITUCIÓN (S.A., S.C., Instituto, Gobierno, etc.):
-  * tipo: "empresa"
-  * DEBE tener representante (persona física que firma)
-- Si es PERSONA FÍSICA (actúa por sí misma):
-  * tipo: "persona"
-  * representante es OPCIONAL (solo si tiene apoderado)
+1. NOMBRE DEL NOTARIO:
+   - Busca en el ENCABEZADO frases como "ante mí", "Notario Público", "Titular de la Notaría"
+   - Extrae el nombre completo en MAYÚSCULAS sin títulos (Lic., Dr., etc.)
+   - Ejemplo correcto: "RIGOBERTO OCHOA TORRES"
+   - Si NO lo encuentras, usa null (NUNCA uses placeholders como "NOMBRE DEL NOTARIO")
 
-# NOTA: Esta instrucción puede eliminarse en el futuro para que el LLM
-# extraiga libremente y la validación se haga post-extracción con regex.
-# Por ahora, dejamos esta guía para ayudar al LLM.
+2. CAMPO "tipo" EN TITULARES Y ADQUIRIENTES:
+   - Cada titular/adquiriente DEBE tener campo "tipo": "empresa" o "persona"
+   - Si es EMPRESA/INSTITUCIÓN (S.A., S.C., Instituto, Gobierno, etc.):
+     * tipo: "empresa"
+     * DEBE tener representante (persona física que firma)
+   - Si es PERSONA FÍSICA (actúa por sí misma):
+     * tipo: "persona"
+     * representante es OPCIONAL (solo si tiene apoderado)
+
+3. VALORES POR DEFECTO:
+   - Si NO encuentras un dato, usa null
+   - NUNCA uses strings como "NO SE ENCONTRÓ DATO", "N/A", "NOMBRE DEL NOTARIO", etc.
 
 PLANTILLA JSON (campos obligatorios):
 ======================================
@@ -568,7 +574,7 @@ PLANTILLA JSON (campos obligatorios):
     "fecha_documento": "fecha",
     "numero_notaria": "45",
     "municipio": "CIUDAD, ESTADO",
-    "nombre_notario": "NOMBRE DEL NOTARIO",
+    "nombre_notario": null,  // Extraer del encabezado (ej: "RIGOBERTO OCHOA TORRES")
     "tipo_titular": null,  // DEPRECATED: ignorar
     "titulares": [
         {
@@ -679,7 +685,7 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
     "fecha_documento": "...",
     "numero_notaria": "45",
     "municipio": "CIUDAD, ESTADO",
-    "nombre_notario": "NOMBRE DEL NOTARIO",
+    "nombre_notario": null,  // Extraer del encabezado (ej: "RIGOBERTO OCHOA TORRES")
     "tipo_titular": "{tipo_titular or 'empresa'}",
     "titulares": [
         {{
