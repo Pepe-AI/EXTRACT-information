@@ -344,41 +344,9 @@ class EscrituraExtractor:
             print(f"   ✅ Tokens estimados: ~{estimate_tokens(formatted_text)}")
             
             # =================================================================
-            # PASO 3: FASE 1 - Clasificación (si está habilitada)
+            # PASO 3: Extracción con LLM (clasificación individual por entidad)
             # =================================================================
-            clasificacion = None
-            tipo_titular = None
-            nombre_titular = None
-            nombre_representante = None
-            
-            if self.config.use_classification:
-                print(f"\n🔍 Paso 3: FASE 1 - Clasificando documento...")
-                clasificacion = clasificar_documento(
-                    texto_documento=clean_text,
-                    ollama_service=self.ollama_service
-                )
-                
-                tipo_titular = clasificacion.tipo_titular
-                nombre_titular = clasificacion.nombre_titular
-                nombre_representante = clasificacion.nombre_representante
-                
-                result.clasificacion = clasificacion.to_dict()
-                result.tipo_detectado = tipo_titular
-                result.metodo_clasificacion = clasificacion.metodo
-                
-                print(f"   ✅ Tipo detectado: {tipo_titular.upper()}")
-                print(f"   📋 Confianza: {clasificacion.confianza}")
-                if nombre_titular:
-                    print(f"   👤 Titular: {nombre_titular[:50]}...")
-                if nombre_representante:
-                    print(f"   👔 Representante: {nombre_representante}")
-            else:
-                print(f"\n⚠️ Paso 3: Clasificación deshabilitada, usando prompt genérico")
-            
-            # =================================================================
-            # PASO 4: FASE 2 - Extracción con LLM general
-            # =================================================================
-            print(f"\n🤖 Paso 4: FASE 2 - Extrayendo datos con LLM...")
+            print(f"\n🤖 Paso 3: Extrayendo datos con LLM...")
             
             json_data, intentos, validacion_estricta, thinking = self._fase2_extraer(
                 document_text=formatted_text
