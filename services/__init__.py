@@ -1,36 +1,10 @@
 """
-services/__init__.py - Exporta servicios del paquete
+services - Servicios externos para el sistema de extracción
 """
 
-from .ollama_service import (
-    OllamaConfig,
-    OllamaService,
-    get_ollama_service
-)
-
-from .azure_ocr_service import (
-    AzureConfig,
-    AzureOCRService,
-    get_ocr_service,
-    OCRServiceError,
-    OCRConfigurationError,
-    OCRConnectionError,
-    OCRAuthenticationError,
-    OCRQuotaExceededError,
-    OCRProcessingError
-)
+from .gemini_service import GeminiFallbackService, get_gemini_fallback_service
 
 __all__ = [
-    'OllamaConfig',
-    'OllamaService',
-    'get_ollama_service',
-    'AzureConfig',
-    'AzureOCRService',
-    'get_ocr_service',
-    'OCRServiceError',
-    'OCRConfigurationError',
-    'OCRConnectionError',
-    'OCRAuthenticationError',
-    'OCRQuotaExceededError',
-    'OCRProcessingError'
+    'GeminiFallbackService',
+    'get_gemini_fallback_service',
 ]

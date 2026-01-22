@@ -13,7 +13,8 @@
       "Bash(git commit -m \"$\\(cat <<''EOF''\nFix: corregir valores por defecto y detección de nombre_notario\n\nCambios principales:\n- NO_ENCONTRADO ahora es null en lugar de \"NO SE ENCONTRÓ DATO\"\n- Actualizado prompt para prohibir placeholders como \"NOMBRE DEL NOTARIO\"\n- Agregadas instrucciones específicas para extraer nombre_notario del encabezado\n- Todos los ejemplos ahora usan null en lugar de strings para datos no encontrados\n- Mejorado template JSON con comentario explicativo para nombre_notario\n\nEsto soluciona:\n- El LLM ya no usará \"NOMBRE DEL NOTARIO\" como placeholder\n- Todos los campos no encontrados serán null consistentemente\n- Mejor detección del nombre del notario con instrucciones claras\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git commit:*)",
       "Bash(Select-String -Pattern \"DIAGNOSTICO|Nombre detectado|NO se detecto|Patron\" -Context 0,2)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(if not exist services mkdir services)"
     ]
   }
 }

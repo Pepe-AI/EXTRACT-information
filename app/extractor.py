@@ -147,6 +147,12 @@ from utils.text_processing import (
 
 
 # =============================================================================
+# CONFIGURACIÓN GEMINI FALLBACK (Fase 2)
+# =============================================================================
+GEMINI_FALLBACK_ENABLED = os.getenv("GEMINI_FALLBACK_ENABLED", "false").lower() == "true"
+
+
+# =============================================================================
 # CONFIGURACIÓN
 # =============================================================================
 
@@ -540,9 +546,85 @@ class EscrituraExtractor:
             print(f"\n📊 Paso 10: Consolidación Final (Plan F)...")
             
             resultado_confianza = sistema.consolidar()
-            
+
             # =================================================================
-            # PASO 11: CONSTRUIR RESPUESTA FINAL
+            # PASO 11: GEMINI FALLBACK GLOBAL (recuperar campos BAJA confianza)
+            # =================================================================
+            campos_recuperados_gemini = []
+            if GEMINI_FALLBACK_ENABLED and resultado_confianza.success:
+                print(f"\n🤖 Paso 11: Gemini Fallback Global...")
+
+                # Detectar campos con BAJA confianza
+                campos_baja = [
+                    campo for campo, nivel in resultado_confianza.confianza.items()
+                    if nivel == "baja"
+                ]
+
+                if campos_baja:
+                    print(f"   Campos con BAJA confianza: {campos_baja}")
+
+                    try:
+                        from services.gemini_service import get_gemini_fallback_service
+
+                        gemini = get_gemini_fallback_service()
+
+                        # Llamar Gemini con todos los campos de una vez
+                        campos_recuperados = gemini.recuperar_campos_faltantes(
+                            texto_ocr=ocr_text,
+                            campos_baja_confianza=campos_baja,
+                            datos_actuales=resultado_confianza.datos
+                        )
+
+                        # Actualizar resultado con campos recuperados
+                        if campos_recuperados:
+                            for campo, valor in campos_recuperados.items():
+                                resultado_confianza.datos[campo] = valor
+                                resultado_confianza.confianza[campo] = "media"  # Gemini = confianza MEDIA
+                                resultado_confianza.origen[campo] = "gemini_fallback"
+                                campos_recuperados_gemini.append(campo)
+                                print(f"   ✅ Gemini recuperó '{campo}': {str(valor)[:50]}...")
+
+                            # Remover de requiere_revision si fue recuperado
+                            resultado_confianza.requiere_revision = [
+                                c for c in resultado_confianza.requiere_revision
+                                if c not in campos_recuperados
+                            ]
+
+                            print(f"   📊 Total campos recuperados: {len(campos_recuperados)}")
+
+                            # Recalcular calidad general
+                            campos_totales = 8
+                            campos_encontrados = sum(
+                                1 for campo in ["numero_escritura", "numero_notaria", "nombre_notario",
+                                               "fecha_documento", "monto_operacion", "titulares",
+                                               "adquirientes", "municipio"]
+                                if resultado_confianza.datos.get(campo) not in [None, "", [], "no encontrado"]
+                            )
+                            calidad_anterior = resultado_confianza.calidad_general
+                            resultado_confianza.calidad_general = (campos_encontrados / campos_totales) * 100
+                            resultado_confianza.campos_encontrados = campos_encontrados
+
+                            print(f"   📊 Mejora de calidad: {calidad_anterior:.1f}% → {resultado_confianza.calidad_general:.1f}%")
+                        else:
+                            print(f"   ⚠️ Gemini no pudo recuperar ningún campo")
+
+                        # Campos que Gemini no pudo recuperar
+                        campos_no_recuperados = set(campos_baja) - set(campos_recuperados.keys())
+                        if campos_no_recuperados:
+                            print(f"   ❌ Campos que requieren revisión manual: {list(campos_no_recuperados)}")
+
+                            # Marcar con nota especial
+                            for campo in campos_no_recuperados:
+                                resultado_confianza.origen[campo] = "requiere_revision_manual"
+
+                    except Exception as e:
+                        print(f"   ⚠️ Error en Gemini Fallback: {e}")
+                        # No fallar el flujo completo, solo registrar error
+                else:
+                    print(f"   ✅ No hay campos con BAJA confianza, Gemini no necesario")
+
+            # =================================================================
+            # PASO 12: CONSTRUIR RESPUESTA FINAL
             # =================================================================
             if not resultado_confianza.success:
                 # FALLO: No se pudieron extraer suficientes datos
