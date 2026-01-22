@@ -2,7 +2,7 @@
 venv/
 .venv/
 env/
-
+backups/
 # Variables de entorno (CONTIENE CONTRASEÑAS)
 .env
 

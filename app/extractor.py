@@ -137,7 +137,13 @@ from models.confianza import (
 )
 from models.secciones import SeccionesDocumento
 
-from utils.text_processing import extraer_todos_regex
+from utils.text_processing import (
+    extraer_todos_regex,
+    extraer_estado_civil,
+    extraer_representante_adquiriente,
+    extraer_numero_instrumento_poder,
+    extraer_fecha_poder,
+)
 
 
 # =============================================================================
@@ -396,7 +402,47 @@ class EscrituraExtractor:
                         print(f"   ✅ {campo}: {valor_str}")
             
             print(f"   📊 Total campos por regex: {campos_regex_encontrados}")
-            
+
+            # =================================================================
+            # PASO 6.5: EXTRACCIÓN CONTEXTUAL (campos que necesitan contexto)
+            # =================================================================
+            print(f"\n📍 Paso 6.5: Extracción contextual con regex...")
+
+            if datos_regex and json_data:
+                # Extraer estado_civil para cada adquiriente
+                for adq in json_data.get("adquirientes", []):
+                    nombre = adq.get("nombre")
+                    if nombre and not adq.get("estado_civil"):
+                        estado = extraer_estado_civil(ocr_text, nombre)
+                        if estado:
+                            adq["estado_civil"] = estado.upper()
+                            datos_regex[f"adquiriente_{nombre}_estado_civil"] = estado.upper()
+                            print(f"   ✅ Estado civil de '{nombre[:30]}...': {estado.upper()}")
+
+                # Extraer representante para cada adquiriente
+                for adq in json_data.get("adquirientes", []):
+                    nombre = adq.get("nombre")
+                    if nombre and not adq.get("representante"):
+                        rep_data = extraer_representante_adquiriente(ocr_text, nombre)
+                        if rep_data:
+                            adq["representante"] = rep_data
+                            print(f"   ✅ Representante de '{nombre[:30]}...': {rep_data['nombre'][:30]}...")
+
+                # Asignar datos del poder al titular con representante
+                numero_inst = datos_regex.get("numero_instrumento_poder")
+                fecha_poder_val = datos_regex.get("fecha_poder")
+
+                if numero_inst or fecha_poder_val:
+                    for titular in json_data.get("titulares", []):
+                        rep = titular.get("representante")
+                        if rep and isinstance(rep, dict):
+                            if numero_inst and not rep.get("escritura"):
+                                rep["escritura"] = numero_inst
+                                print(f"   ✅ Número de instrumento: {numero_inst}")
+                            if fecha_poder_val and not rep.get("fecha_poder"):
+                                rep["fecha_poder"] = fecha_poder_val
+                                print(f"   ✅ Fecha de poder: {fecha_poder_val}")
+
             # =================================================================
             # PASO 7: VALIDACIÓN CRUZADA (Plan B)
             # =================================================================

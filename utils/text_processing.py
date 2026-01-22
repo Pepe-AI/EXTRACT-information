@@ -872,6 +872,326 @@ def extraer_nombre_notario(texto: str) -> Optional[str]:
     return None
 
 
+def extraer_estado_civil(texto: str, nombre_persona: str) -> Optional[str]:
+    """
+    Extrae estado civil de una persona en el documento.
+
+    PATRONES QUE BUSCA:
+    ===================
+    1. "NOMBRE, mayor de edad, ESTADO_CIVIL"
+       Ej: "ANGELBERTHA PÉREZ SOTO, mayor de edad, casada"
+
+    2. "ESTADO_CIVIL, mayor de edad"
+       Ej: "casada, empleada doméstica, originaria de..."
+
+    3. Contexto cercano al nombre (±200 chars)
+
+    Args:
+        texto: Texto OCR completo
+        nombre_persona: Nombre de la persona a buscar
+
+    Returns:
+        str: "casado"/"casada"/"soltero"/"soltera"/"divorciado"/etc o None
+
+    Ejemplos:
+        >>> texto = "MARIA LOPEZ, mayor de edad, casada, originaria de..."
+        >>> extraer_estado_civil(texto, "MARIA LOPEZ")
+        'casada'
+    """
+    if not nombre_persona or not texto:
+        return None
+
+    # Normalizar nombre para búsqueda flexible
+    nombre_limpio = re.sub(r'[áéíóúÁÉÍÓÚ]', lambda m: {
+        'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u',
+        'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U'
+    }[m.group()], nombre_persona)
+
+    # Patrón de estados civiles
+    estados = r'(casad[oa]s?|solter[oa]s?|divorciad[oa]s?|viud[oa]s?)'
+
+    # PATRÓN 1: "NOMBRE, mayor de edad, ESTADO_CIVIL"
+    patron_1 = rf'{re.escape(nombre_limpio)}[^.]*?mayor\s+de\s+edad[,\s]+{estados}'
+    match = re.search(patron_1, texto, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+
+    # PATRÓN 2: Buscar en contexto cercano al nombre (±200 chars)
+    pos_nombre = texto.upper().find(nombre_limpio.upper())
+    if pos_nombre != -1:
+        inicio = max(0, pos_nombre - 50)
+        fin = min(len(texto), pos_nombre + 250)
+        contexto = texto[inicio:fin]
+
+        patron_2 = rf'{estados}[,\s]+.*?(?:mayor\s+de\s+edad|emplead[oa]|originari[oa])'
+        match = re.search(patron_2, contexto, re.IGNORECASE)
+        if match:
+            return match.group(1).lower()
+
+    # PATRÓN 3: "ser mexicano/a, mayor de edad, ESTADO"
+    patron_3 = rf'ser\s+mexican[oa][,\s]+mayor\s+de\s+edad[,\s]+{estados}'
+    match = re.search(patron_3, texto, re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+
+    return None
+
+
+def extraer_representante_adquiriente(
+    texto: str,
+    nombre_adquiriente: str
+) -> Optional[Dict[str, Any]]:
+    """
+    Extrae representante que actúa por el adquiriente.
+
+    PATRONES QUE BUSCA:
+    ===================
+    1. "ADQUIRIENTE, representada por [NOMBRE], en calidad de [CARGO]"
+    2. "representada por su [CARGO] [NOMBRE]"
+    3. "gestor/a de negocios [NOMBRE]"
+    4. "apoderado/a [NOMBRE]"
+
+    Args:
+        texto: Texto OCR completo
+        nombre_adquiriente: Nombre del adquiriente
+
+    Returns:
+        Dict con estructura:
+        {
+            "nombre": "MARIA GUADALUPE HILDA BERNAL CHAVARIN",
+            "en_calidad": "GESTOR",
+            "escritura": None,
+            "bis": False,
+            "fecha_poder": None
+        }
+
+    Ejemplos:
+        >>> texto = "ANGELBERTHA PEREZ SOTO, representada por su Gestora de Negocios la Licenciada MA. GUADALUPE HILDA BERNAL CHAVARIN"
+        >>> extraer_representante_adquiriente(texto, "ANGELBERTHA PEREZ SOTO")
+        {'nombre': 'MA. GUADALUPE HILDA BERNAL CHAVARIN', 'en_calidad': 'GESTOR', ...}
+    """
+    if not nombre_adquiriente or not texto:
+        return None
+
+    def limpiar_nombre_representante(nombre: str) -> str:
+        """Limpia nombre de representante."""
+        # Remover títulos profesionales
+        nombre = re.sub(r'^(?:Lic(?:enciado)?|Dr|Mtro|C)\.?\s+', '', nombre, flags=re.IGNORECASE)
+        # Remover "también conocida como..."
+        nombre = re.sub(r'\s+tambien.*$', '', nombre, flags=re.IGNORECASE)
+        nombre = re.sub(r'\s+conocid[oa].*$', '', nombre, flags=re.IGNORECASE)
+        return nombre.strip().upper()
+
+    # PATRÓN 1: "representad[oa] por [su] [CARGO] [la/el] [TÍTULO] [NOMBRE]"
+    # Usar búsqueda más flexible sin restricción de caracteres acentuados
+    patron_1 = rf'representad[oa]\s+(?:en\s+este\s+acto\s+)?por\s+su\s+([^,]+?)\s+(?:la|el)\s+(?:Lic(?:enciado|enciada)?|Dr|C)\.?\s+([A-Z][A-Z\s\.]+?)(?:\s+tambien|,)'
+
+    match = re.search(patron_1, texto, re.IGNORECASE)
+    if match:
+        cargo = match.group(1).strip()
+        nombre_rep = match.group(2).strip()
+
+        # Normalizar cargo
+        cargo_normalizado = cargo.upper()
+        if 'GESTOR' in cargo_normalizado:
+            en_calidad = 'GESTOR'
+        elif 'APODERADO' in cargo_normalizado:
+            en_calidad = 'APODERADO'
+        elif 'REPRESENTANTE' in cargo_normalizado:
+            en_calidad = 'REPRESENTANTE LEGAL'
+        else:
+            en_calidad = cargo.upper()
+
+        return {
+            "nombre": limpiar_nombre_representante(nombre_rep),
+            "en_calidad": en_calidad,
+            "escritura": None,
+            "bis": False,
+            "fecha_poder": None
+        }
+
+    # PATRÓN 2: "por [NOMBRE], en calidad/su calidad de [CARGO]"
+    patron_2 = rf'por\s+(?:la|el)\s+(?:Lic|Dr|C)\.?\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s\.]{10,60}?),?\s+en\s+(?:su\s+)?calidad\s+de\s+([^,\.]+)'
+
+    match = re.search(patron_2, texto, re.IGNORECASE)
+    if match:
+        nombre_rep = match.group(1).strip()
+        cargo = match.group(2).strip()
+
+        return {
+            "nombre": limpiar_nombre_representante(nombre_rep),
+            "en_calidad": cargo.upper(),
+            "escritura": None,
+            "bis": False,
+            "fecha_poder": None
+        }
+
+    return None
+
+
+def extraer_numero_instrumento_poder(texto: str) -> Optional[str]:
+    """
+    Extrae número de instrumento/escritura del poder.
+
+    PATRONES QUE BUSCA:
+    ===================
+    1. "instrumento [NÚMERO] [texto_número]"
+       Ej: "instrumento 63,550 sesenta y tres mil quinientos cincuenta"
+
+    2. "escritura número [NÚMERO]"
+       Ej: "escritura número 21,695 veintiún mil seiscientos noventa y cinco"
+
+    3. Contexto: cerca de "poder", "representante", "apoderado"
+
+    Args:
+        texto: Texto OCR completo
+
+    Returns:
+        str: Número limpio sin comas (ej: "63550")
+
+    Ejemplos:
+        >>> texto = "exhibe instrumento 63,550 sesenta y tres mil quinientos cincuenta"
+        >>> extraer_numero_instrumento_poder(texto)
+        '63550'
+    """
+    if not texto:
+        return None
+
+    def limpiar_numero_instrumento(numero_str: str) -> Optional[int]:
+        """Limpia y valida número de instrumento."""
+        # Remover espacios, comas, puntos
+        limpio = re.sub(r'[,.\s]', '', numero_str)
+        try:
+            numero = int(limpio)
+            # Validar rango razonable
+            if 100 <= numero <= 999999:
+                return numero
+        except ValueError:
+            pass
+        return None
+
+    # PATRÓN 1: "instrumento [NÚMERO]" (más común en poderes)
+    patron_1 = r'instrumento\s+(?:p[uú]blico\s+)?(?:n[uú]mero\s+)?([\d,.\s]+)'
+
+    matches = re.finditer(patron_1, texto, re.IGNORECASE)
+    for match in matches:
+        numero_str = match.group(1)
+        numero = limpiar_numero_instrumento(numero_str)
+        if numero and 1000 <= numero <= 999999:  # Rango típico
+            return str(numero)
+
+    # PATRÓN 2: "escritura número [NÚMERO]" en contexto de poder
+    patron_2 = r'(?:poder|representante|apoderado)[^.]{0,200}?escritura\s+(?:n[uú]mero|No\.?)\s*([\d,.\s]+)'
+
+    match = re.search(patron_2, texto, re.IGNORECASE)
+    if match:
+        numero_str = match.group(1)
+        numero = limpiar_numero_instrumento(numero_str)
+        if numero and 1000 <= numero <= 999999:
+            return str(numero)
+
+    return None
+
+
+def extraer_fecha_poder(texto: str) -> Optional[str]:
+    """
+    Extrae fecha del poder/instrumento.
+
+    PATRONES QUE BUSCA:
+    ===================
+    1. "de fecha [DÍA] [día_texto] del mes de [MES] del año [AÑO]"
+       Ej: "de fecha 15 quince del mes de abril del año 2020"
+
+    2. "fecha [DÍA] de [MES] de [AÑO]"
+       Ej: "fecha 14 de octubre de 2021"
+
+    3. Contexto: cerca de "instrumento", "poder", "escritura"
+
+    Args:
+        texto: Texto OCR completo
+
+    Returns:
+        str: Fecha en formato "M/D/YYYY" (ej: "4/15/2020")
+
+    Ejemplos:
+        >>> texto = "de fecha 15 quince del mes de abril del año 2020"
+        >>> extraer_fecha_poder(texto)
+        '4/15/2020'
+    """
+    if not texto:
+        return None
+
+    # Mapeo de meses
+    MESES = {
+        'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
+        'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
+        'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+    }
+
+    def validar_fecha(dia: int, mes: int, anio: int) -> bool:
+        """Valida que la fecha sea válida."""
+        if not (1 <= mes <= 12):
+            return False
+        if not (1 <= dia <= 31):
+            return False
+        if not (1990 <= anio <= 2030):  # Rango razonable
+            return False
+
+        # Validar días por mes
+        dias_por_mes = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        return dia <= dias_por_mes[mes - 1]
+
+    # PATRÓN 1: "de fecha [DÍA] ... del mes de [MES] ... del año [AÑO]"
+    patron_1 = r'de\s+fecha\s+(\d{1,2})\s+[a-záéíóúñ]+\s+del\s+mes\s+de\s+([a-záéíóúñ]+)\s+del\s+a[ñn]o\s+(\d{4})'
+
+    match = re.search(patron_1, texto, re.IGNORECASE)
+    if match:
+        dia = int(match.group(1))
+        mes_nombre = match.group(2).lower()
+        anio = int(match.group(3))
+
+        mes = MESES.get(mes_nombre)
+        if mes and validar_fecha(dia, mes, anio):
+            return f"{mes}/{dia}/{anio}"
+
+    # PATRÓN 2: "fecha [DÍA] de [MES] de [AÑO]"
+    patron_2 = r'fecha\s+(\d{1,2})\s+de\s+([a-záéíóúñ]+)\s+de(?:l)?\s+(\d{4})'
+
+    match = re.search(patron_2, texto, re.IGNORECASE)
+    if match:
+        dia = int(match.group(1))
+        mes_nombre = match.group(2).lower()
+        anio = int(match.group(3))
+
+        mes = MESES.get(mes_nombre)
+        if mes and validar_fecha(dia, mes, anio):
+            return f"{mes}/{dia}/{anio}"
+
+    # PATRÓN 3: Contexto "instrumento ... de fecha DD/MM/AAAA"
+    patron_3 = r'instrumento[^.]{0,100}?de\s+fecha[^.]{0,50}?(\d{1,2})[/-](\d{1,2})[/-](\d{4})'
+
+    match = re.search(patron_3, texto, re.IGNORECASE)
+    if match:
+        parte1 = int(match.group(1))
+        parte2 = int(match.group(2))
+        anio = int(match.group(3))
+
+        # Detectar formato (DD/MM o MM/DD)
+        if parte1 <= 12 and parte2 > 12:  # MM/DD/YYYY
+            mes, dia = parte1, parte2
+        elif parte2 <= 12 and parte1 > 12:  # DD/MM/YYYY
+            dia, mes = parte1, parte2
+        elif parte1 <= 12 and parte2 <= 12:  # Ambiguo, asumir MM/DD
+            mes, dia = parte1, parte2
+        else:
+            return None
+
+        if validar_fecha(dia, mes, anio):
+            return f"{mes}/{dia}/{anio}"
+
+    return None
+
+
 def extraer_rfc_todos(texto: str) -> List[str]:
     """
     Extrae TODOS los RFC encontrados en el documento.
@@ -1127,6 +1447,13 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
 
         # Listas de identificadores
         "curps": extraer_curp_todos(texto),
+
+        # Campos de poder/instrumento (FASE 1 - Nuevos campos críticos)
+        "numero_instrumento_poder": extraer_numero_instrumento_poder(texto),
+        "fecha_poder": extraer_fecha_poder(texto),
+
+        # NOTA: estado_civil y representante_adquiriente requieren contexto
+        # Se extraerán en post-procesamiento con datos de adquirientes
     }
 
 
