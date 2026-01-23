@@ -407,6 +407,15 @@ def test_extract_real_pdf():
         print(f"   Método: {metadata.get('method', 'N/A')}")
         print(f"   Caracteres extraídos: {len(text)}")
         
+        # Guardar extracción en archivo de texto
+        output_file = Path(__file__).parent / "extraction_result.txt"
+        try:
+            with open(output_file, "w", encoding="utf-8") as f:
+                f.write(text)
+            print(f"\n💾 Extracción guardada en: {output_file}")
+        except Exception as e:
+            print(f"\n⚠️  No se pudo guardar el archivo de texto: {e}")
+        
         print(f"\n📝 Primeros 500 caracteres del texto:")
         print("-" * 40)
         print(text[:500] + "..." if len(text) > 500 else text)

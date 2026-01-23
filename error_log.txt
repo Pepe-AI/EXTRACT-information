@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "C:\Users\Usuari\OneDrive\Desktop\GisNet Proyectos\Extract_information_PDF\repro_import_error.py", line 7, in <module>
+    from app import extractor
+  File "C:\Users\Usuari\OneDrive\Desktop\GisNet Proyectos\Extract_information_PDF\app\__init__.py", line 5, in <module>
+    from .extractor import (
+    ...<4 lines>...
+    )
+  File "C:\Users\Usuari\OneDrive\Desktop\GisNet Proyectos\Extract_information_PDF\app\extractor.py", line 132, in <module>
+    from extraction.segmentador import segmentar_documento
+  File "C:\Users\Usuari\OneDrive\Desktop\GisNet Proyectos\Extract_information_PDF\extraction\__init__.py", line 27, in <module>
+    from extraction.sistema_confianza import (
+    ...<2 lines>...
+    )
+ImportError: cannot import name 'consolidar_extraccion' from 'extraction.sistema_confianza' (C:\Users\Usuari\OneDrive\Desktop\GisNet Proyectos\Extract_information_PDF\extraction\sistema_confianza.py)

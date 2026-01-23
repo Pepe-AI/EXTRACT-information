@@ -144,6 +144,12 @@ from utils.text_processing import (
     extraer_numero_instrumento_poder,
     extraer_fecha_poder,
 )
+from utils.gemini_prompts import (
+    build_gemini_prompt_critico,
+    build_gemini_prompt_expandido,
+    build_gemini_prompt_completo,
+    parse_gemini_response,
+)
 
 
 # =============================================================================
@@ -450,6 +456,32 @@ class EscrituraExtractor:
                                 print(f"   ✅ Fecha de poder: {fecha_poder_val}")
 
             # =================================================================
+            # PASO 6.6: EXTRACCIÓN GEMINI (Campos críticos <90%)
+            # =================================================================
+            print(f"\n🔮 Paso 6.6: Extracción Gemini (campos críticos)...")
+
+            # Extraer campos críticos con Gemini (titular/adquiriente)
+            gemini_data = self._extraer_con_gemini(ocr_text, nivel="critico")
+
+            # Mergear Gemini con DeepSeek (prioridad Gemini para titular/adquiriente)
+            if gemini_data and json_data:
+                json_data = self._merge_deepseek_gemini(json_data, gemini_data)
+            elif gemini_data and not json_data:
+                # Si DeepSeek falló completamente, usar Gemini como base
+                print(f"   ⚠️ DeepSeek falló, usando Gemini como fuente principal")
+                json_data = {
+                    "titulares": [gemini_data.get("titular")] if gemini_data.get("titular") else [],
+                    "adquirientes": [gemini_data.get("adquiriente")] if gemini_data.get("adquiriente") else [],
+                    # Agregar campos de DeepSeek/REGEX que puedan existir
+                    "numero_escritura": datos_regex.get("numero_escritura"),
+                    "fecha_documento": datos_regex.get("fecha_documento"),
+                    "numero_notaria": datos_regex.get("numero_notaria"),
+                    "nombre_notario": datos_regex.get("nombre_notario"),
+                    "municipio": gemini_data.get("municipio") or datos_regex.get("municipio"),
+                    "monto_operacion": gemini_data.get("monto_operacion") or datos_regex.get("monto_operacion"),
+                }
+
+            # =================================================================
             # PASO 7: VALIDACIÓN CRUZADA (Plan B)
             # =================================================================
             print(f"\n✓ Paso 7: Validación Cruzada (Plan B)...")
@@ -548,20 +580,20 @@ class EscrituraExtractor:
             resultado_confianza = sistema.consolidar()
 
             # =================================================================
-            # PASO 11: GEMINI FALLBACK GLOBAL (recuperar campos BAJA confianza)
+            # PASO 11: GEMINI FALLBACK GLOBAL (recuperar campos MEDIA/BAJA confianza)
             # =================================================================
             campos_recuperados_gemini = []
             if GEMINI_FALLBACK_ENABLED and resultado_confianza.success:
                 print(f"\n🤖 Paso 11: Gemini Fallback Global...")
 
-                # Detectar campos con BAJA confianza
-                campos_baja = [
+                # Detectar campos con MEDIA o BAJA confianza
+                campos_media_baja = [
                     campo for campo, nivel in resultado_confianza.confianza.items()
-                    if nivel == "baja"
+                    if nivel in ["media", "baja"]
                 ]
 
-                if campos_baja:
-                    print(f"   Campos con BAJA confianza: {campos_baja}")
+                if campos_media_baja:
+                    print(f"   Campos con MEDIA/BAJA confianza: {campos_media_baja}")
 
                     try:
                         from services.gemini_service import get_gemini_fallback_service
@@ -571,7 +603,7 @@ class EscrituraExtractor:
                         # Llamar Gemini con todos los campos de una vez
                         campos_recuperados = gemini.recuperar_campos_faltantes(
                             texto_ocr=ocr_text,
-                            campos_baja_confianza=campos_baja,
+                            campos_baja_confianza=campos_media_baja,
                             datos_actuales=resultado_confianza.datos
                         )
 
@@ -609,7 +641,7 @@ class EscrituraExtractor:
                             print(f"   ⚠️ Gemini no pudo recuperar ningún campo")
 
                         # Campos que Gemini no pudo recuperar
-                        campos_no_recuperados = set(campos_baja) - set(campos_recuperados.keys())
+                        campos_no_recuperados = set(campos_media_baja) - set(campos_recuperados.keys())
                         if campos_no_recuperados:
                             print(f"   ❌ Campos que requieren revisión manual: {list(campos_no_recuperados)}")
 
@@ -621,7 +653,7 @@ class EscrituraExtractor:
                         print(f"   ⚠️ Error en Gemini Fallback: {e}")
                         # No fallar el flujo completo, solo registrar error
                 else:
-                    print(f"   ✅ No hay campos con BAJA confianza, Gemini no necesario")
+                    print(f"   ✅ No hay campos con MEDIA/BAJA confianza, Gemini no necesario")
 
             # =================================================================
             # PASO 12: CONSTRUIR RESPUESTA FINAL
@@ -648,14 +680,22 @@ class EscrituraExtractor:
             else:
                 # ÉXITO (completo o parcial)
                 result.success = True
-                result.data = resultado_confianza.datos
+
+                # Limpiar campos internos que NO deben aparecer en raíz del JSON final
+                datos_limpios = dict(resultado_confianza.datos) if resultado_confianza.datos else {}
+                campos_internos = ['numero_instrumento_poder', 'fecha_poder']
+                for campo in campos_internos:
+                    if campo in datos_limpios:
+                        del datos_limpios[campo]
+
+                result.data = datos_limpios
                 result.confianza = resultado_confianza.confianza
                 result.origen = resultado_confianza.origen
                 result.requiere_revision = resultado_confianza.requiere_revision
                 result.calidad_general = resultado_confianza.calidad_general
                 result.campos_encontrados = resultado_confianza.campos_encontrados
                 result.campos_no_encontrados = resultado_confianza.campos_faltantes
-                
+
                 # Determinar si pasó validación estricta (8 campos encontrados)
                 result.validacion_estricta = resultado_confianza.campos_encontrados >= 8
                 
@@ -843,10 +883,288 @@ class EscrituraExtractor:
         
         # Después de todos los intentos
         print(f"\n   ⚠️ Usando validación flexible después de {self.config.max_retries} intentos")
-        
+
         thinking_final = "\n---\n".join(all_thinking) if all_thinking else None
         return json_data, self.config.max_retries, False, thinking_final
-    
+
+    def _extraer_con_gemini(
+        self,
+        ocr_text: str,
+        nivel: str = "critico"
+    ) -> Dict[str, Any]:
+        """
+        Extrae campos usando Gemini según el nivel de cobertura.
+
+        ARQUITECTURA MODULAR:
+        ====================
+        Esta función permite escalar gradualmente la extracción con Gemini.
+
+        Niveles disponibles:
+        - "critico": Solo titular/adquiriente (VERSIÓN 1 - ACTUAL)
+        - "expandido": + municipio, monto, poder (VERSIÓN 2 - FUTURA)
+        - "completo": Todos los campos <90% (VERSIÓN 3 - FUTURA)
+
+        Args:
+            ocr_text: Texto OCR del documento
+            nivel: "critico" | "expandido" | "completo"
+
+        Returns:
+            Dict con campos extraídos por Gemini
+
+        Ejemplo de retorno (nivel="critico"):
+            {
+                "titular": {
+                    "nombre": "INSTITUTO NACIONAL...",
+                    "tipo": "empresa",
+                    "representante": {
+                        "nombre": "ERNESTO PADILLA ACEVES",
+                        "en_calidad": "Representante Regional"
+                    }
+                },
+                "adquiriente": {
+                    "nombre": "ANGELBERTA PÉREZ SOTO",
+                    "tipo": "persona",
+                    "representante": null
+                }
+            }
+        """
+
+        # Seleccionar prompt según nivel
+        if nivel == "critico":
+            prompt = build_gemini_prompt_critico(ocr_text)
+        elif nivel == "expandido":
+            prompt = build_gemini_prompt_expandido(ocr_text)
+        else:  # completo
+            prompt = build_gemini_prompt_completo(ocr_text)
+
+        try:
+            # Importar servicio Gemini (lazy import)
+            from services.gemini_service import get_gemini_fallback_service
+
+            gemini_service = get_gemini_fallback_service()
+
+            print(f"\n🔮 Extrayendo campos con Gemini (nivel: {nivel})...")
+
+            # Generar contenido con Gemini
+            response = gemini_service.generate_content(prompt)
+
+            if not response:
+                print(f"   ⚠️ Gemini no devolvió respuesta")
+                return {}
+
+            # Parsear respuesta JSON
+            json_data = parse_gemini_response(response)
+
+            if json_data:
+                # Mostrar resumen de lo extraído
+                if "titular" in json_data and json_data["titular"]:
+                    titular_nombre = json_data["titular"].get("nombre", "N/A")
+                    print(f"   ✅ Titular (vendedor): {titular_nombre[:50]}...")
+
+                if "adquiriente" in json_data and json_data["adquiriente"]:
+                    adq_nombre = json_data["adquiriente"].get("nombre", "N/A")
+                    print(f"   ✅ Adquiriente (comprador): {adq_nombre[:50]}...")
+
+                if nivel in ["expandido", "completo"]:
+                    if "municipio" in json_data:
+                        print(f"   ✅ Municipio: {json_data.get('municipio', 'N/A')}")
+                    if "monto_operacion" in json_data:
+                        print(f"   ✅ Monto: {json_data.get('monto_operacion', 'N/A')}")
+
+                return json_data
+            else:
+                print(f"   ⚠️ No se pudo parsear respuesta de Gemini")
+                return {}
+
+        except Exception as e:
+            print(f"   ❌ Error en Gemini ({nivel}): {e}")
+            import traceback
+            traceback.print_exc()
+            return {}
+
+    def _merge_deepseek_gemini(
+        self,
+        deepseek_data: Dict[str, Any],
+        gemini_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Combina datos de DeepSeek y Gemini con prioridades inteligentes.
+
+        ESTRATEGIA DE MERGE:
+        ===================
+        1. DeepSeek: Campos estructurados fáciles (>90% precisión)
+           - numero_escritura
+           - fecha_documento
+           - numero_notaria
+           - nombre_notario
+           - tipo_titular
+
+        2. Gemini: Campos contextuales críticos (<90% precisión)
+           - titular.nombre ← PRIORIDAD GEMINI
+           - titular.tipo ← PRIORIDAD GEMINI
+           - titular.representante ← PRIORIDAD GEMINI
+           - adquiriente.nombre ← PRIORIDAD GEMINI
+           - adquiriente.tipo ← PRIORIDAD GEMINI
+           - adquiriente.representante ← PRIORIDAD GEMINI
+
+        3. REGEX: Campos numéricos (fallback)
+           - municipio
+           - monto_operacion
+
+        Args:
+            deepseek_data: Datos de DeepSeek
+            gemini_data: Datos de Gemini
+
+        Returns:
+            Dict fusionado con las mejores fuentes
+        """
+
+        # Copiar todos los datos de DeepSeek como base
+        resultado = dict(deepseek_data) if deepseek_data else {}
+
+        if not gemini_data:
+            print("   ⚠️ No hay datos de Gemini para mergear")
+            return resultado
+
+        print("\n🔀 Mergeando DeepSeek + Gemini...")
+
+        # ====================================================================
+        # MERGE DE TITULAR (prioridad Gemini para nombre/tipo/representante)
+        # ====================================================================
+
+        if "titular" in gemini_data and gemini_data["titular"]:
+            gemini_titular = gemini_data["titular"]
+
+            # Si DeepSeek tiene titulares, actualizar el primero
+            if "titulares" in resultado and resultado["titulares"]:
+                deepseek_titular = resultado["titulares"][0]
+
+                # PRIORIDAD GEMINI: nombre
+                if gemini_titular.get("nombre"):
+                    deepseek_titular["nombre"] = gemini_titular["nombre"]
+                    print(f"   ✅ Titular.nombre ← Gemini")
+
+                # PRIORIDAD GEMINI: tipo
+                if gemini_titular.get("tipo"):
+                    deepseek_titular["tipo"] = gemini_titular["tipo"]
+                    print(f"   ✅ Titular.tipo ← Gemini ({gemini_titular['tipo']})")
+
+                # PRIORIDAD GEMINI: representantes (puede ser array o dict)
+                if "representantes" in gemini_titular:
+                    reps = gemini_titular["representantes"]
+                    if isinstance(reps, list) and len(reps) > 0:
+                        # Múltiples representantes → convertir a formato interno
+                        # Por ahora, tomamos el primero para mantener compatibilidad
+                        deepseek_titular["representante"] = reps[0]
+                        deepseek_titular["actua_por"] = "representación"
+                        print(f"   ✅ Titular.representante ← Gemini ({reps[0].get('nombre', 'N/A')[:30]}...)")
+                        if len(reps) > 1:
+                            print(f"   ⚠️ Detectados {len(reps)} representantes (usando primero)")
+                    elif reps is None:
+                        deepseek_titular["representante"] = None
+                        deepseek_titular["actua_por"] = "derecho propio"
+                        print(f"   ✅ Titular.representante ← Gemini (null)")
+                elif "representante" in gemini_titular:
+                    # Formato antiguo (dict único)
+                    deepseek_titular["representante"] = gemini_titular["representante"]
+                    if gemini_titular["representante"]:
+                        deepseek_titular["actua_por"] = "representación"
+                        rep_nombre = gemini_titular["representante"].get("nombre", "N/A")
+                        print(f"   ✅ Titular.representante ← Gemini ({rep_nombre[:30]}...)")
+                    else:
+                        deepseek_titular["actua_por"] = "derecho propio"
+                        print(f"   ✅ Titular.representante ← Gemini (null)")
+
+            else:
+                # DeepSeek no tiene titulares, crear desde Gemini
+                resultado["titulares"] = [{
+                    "nombre": gemini_titular.get("nombre"),
+                    "tipo": gemini_titular.get("tipo"),
+                    "actua_por": "representación" if gemini_titular.get("representante") else "derecho propio",
+                    "representante": gemini_titular.get("representante")
+                }]
+                print(f"   ✅ Titular completo ← Gemini (DeepSeek no lo tenía)")
+
+        # ====================================================================
+        # MERGE DE ADQUIRIENTE (prioridad Gemini para nombre/tipo/representante)
+        # ====================================================================
+
+        if "adquiriente" in gemini_data and gemini_data["adquiriente"]:
+            gemini_adq = gemini_data["adquiriente"]
+
+            # Si DeepSeek tiene adquirientes, actualizar el primero
+            if "adquirientes" in resultado and resultado["adquirientes"]:
+                deepseek_adq = resultado["adquirientes"][0]
+
+                # PRIORIDAD GEMINI: nombre
+                if gemini_adq.get("nombre"):
+                    deepseek_adq["nombre"] = gemini_adq["nombre"]
+                    print(f"   ✅ Adquiriente.nombre ← Gemini")
+
+                # PRIORIDAD GEMINI: tipo
+                if gemini_adq.get("tipo"):
+                    deepseek_adq["tipo"] = gemini_adq["tipo"]
+                    print(f"   ✅ Adquiriente.tipo ← Gemini ({gemini_adq['tipo']})")
+
+                # PRIORIDAD GEMINI: representantes (puede ser array o dict)
+                if "representantes" in gemini_adq:
+                    reps = gemini_adq["representantes"]
+                    if isinstance(reps, list) and len(reps) > 0:
+                        # Múltiples representantes → convertir a formato interno
+                        deepseek_adq["representante"] = reps[0]
+                        deepseek_adq["actua_por"] = "representación"
+                        print(f"   ✅ Adquiriente.representante ← Gemini ({reps[0].get('nombre', 'N/A')[:30]}...)")
+                        if len(reps) > 1:
+                            print(f"   ⚠️ Detectados {len(reps)} representantes (usando primero)")
+                    elif reps is None:
+                        deepseek_adq["representante"] = None
+                        deepseek_adq["actua_por"] = "derecho propio"
+                        print(f"   ✅ Adquiriente.representante ← Gemini (null)")
+                elif "representante" in gemini_adq:
+                    # Formato antiguo (dict único)
+                    deepseek_adq["representante"] = gemini_adq["representante"]
+                    if gemini_adq["representante"]:
+                        deepseek_adq["actua_por"] = "representación"
+                        rep_nombre = gemini_adq["representante"].get("nombre", "N/A")
+                        print(f"   ✅ Adquiriente.representante ← Gemini ({rep_nombre[:30]}...)")
+                    else:
+                        deepseek_adq["actua_por"] = "derecho propio"
+                        print(f"   ✅ Adquiriente.representante ← Gemini (null)")
+
+                # Gemini también puede traer estado_civil (versiones futuras)
+                if gemini_adq.get("estado_civil"):
+                    deepseek_adq["estado_civil"] = gemini_adq["estado_civil"]
+                    print(f"   ✅ Adquiriente.estado_civil ← Gemini")
+
+            else:
+                # DeepSeek no tiene adquirientes, crear desde Gemini
+                resultado["adquirientes"] = [{
+                    "nombre": gemini_adq.get("nombre"),
+                    "tipo": gemini_adq.get("tipo"),
+                    "actua_por": "representación" if gemini_adq.get("representante") else "derecho propio",
+                    "estado_civil": gemini_adq.get("estado_civil"),
+                    "representante": gemini_adq.get("representante"),
+                    "rfc": gemini_adq.get("rfc", False),
+                    "curp": gemini_adq.get("curp", False),
+                    "tipo_sociedad": gemini_adq.get("tipo_sociedad"),
+                    "edad": gemini_adq.get("edad"),
+                }]
+                print(f"   ✅ Adquiriente completo ← Gemini (DeepSeek no lo tenía)")
+
+        # ====================================================================
+        # MERGE DE CAMPOS NUMÉRICOS (si Gemini nivel expandido/completo)
+        # ====================================================================
+
+        if "municipio" in gemini_data and gemini_data["municipio"]:
+            resultado["municipio"] = gemini_data["municipio"]
+            print(f"   ✅ Municipio ← Gemini")
+
+        if "monto_operacion" in gemini_data and gemini_data["monto_operacion"]:
+            resultado["monto_operacion"] = gemini_data["monto_operacion"]
+            print(f"   ✅ Monto ← Gemini")
+
+        return resultado
+
     def _aplicar_clasificacion_fallback(self, json_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Aplica clasificación fallback por regex cuando el campo 'tipo' es None.
@@ -872,6 +1190,23 @@ class EscrituraExtractor:
             r'\bCORPORACIÓN',
             r'\bGRUPO\s+',
             r'\bASSOCIATES?\b',
+            # Instituciones gubernamentales y organismos
+            r'\bINFONAVIT\b',
+            r'\bFOVISSSTE\b',
+            r'\bIMSS\b',
+            r'\bISST[EE]\b',
+            r'\bCFE\b',
+            r'\bPEMEX\b',
+            r'\bBANOBRAS\b',
+            r'\bFONHAPO\b',
+            r'\bINSUS\b',
+            r'\bINVIEND\b',
+            r'\bCONAVI\b',
+            r'\bFONADIN\b',
+            r'\bSEDATU\b',
+            r'\bSEDESO[L]\?\b',
+            r'\bINSTITUTO\s+(?:FEDERAL|ESTATAL|NACIONAL)',
+            r'\bORGANISMO\s+',
         ]
 
         def detectar_tipo_por_nombre(nombre: str) -> str:

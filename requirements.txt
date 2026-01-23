@@ -50,9 +50,9 @@ Jinja2>=3.1.0
 aiofiles>=23.0.0
 
 # === GEMINI API (Fase 2 - Fallback Global) ===
-# Google Generative AI: API de Gemini para fallback de campos con baja confianza
+# Google GenAI: Nueva API oficial de Gemini (reemplaza google-generativeai)
 # - Activar con GEMINI_FALLBACK_ENABLED=true en .env
-google-generativeai>=0.8.0
+google-genai>=0.2.0
 
 # === DESARROLLO (OPCIONAL) ===
 # Descomenta para herramientas de desarrollo

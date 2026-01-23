@@ -4,7 +4,7 @@ services/gemini_service.py - Servicio Gemini para Fallback Global
 ESTRATEGIA:
 ===========
 - Se activa DESPUÉS del Plan F (consolidación final)
-- Recibe lista de campos con confianza BAJA
+- Recibe lista de campos con confianza MEDIA o BAJA
 - Hace UNA llamada con prompt estructurado para TODOS los campos
 - Retorna JSON con campos recuperados
 
@@ -12,13 +12,13 @@ COSTO ESTIMADO:
 ===============
 - Gemini 2.0 Flash: $0.075 / 1M tokens entrada
 - Prompt típico: ~2000 tokens (texto OCR + estructura JSON)
-- 300 docs/día × 0.4 (tasa confianza BAJA) = 120 llamadas/día
-- 120 × 2000 tokens × 30 días = 7.2M tokens/mes
-- Costo mensual: ~$0.54 USD/mes
+- 300 docs/día × 0.6 (tasa confianza MEDIA/BAJA) = 180 llamadas/día
+- 180 × 2000 tokens × 30 días = 10.8M tokens/mes
+- Costo mensual: ~$0.81 USD/mes
 
 OPTIMIZACIONES:
 ===============
-- Solo se activa si hay campos con BAJA confianza
+- Solo se activa si hay campos con MEDIA o BAJA confianza
 - Prompt único (no múltiples llamadas)
 - Timeout de 15 segundos
 - Cache de respuestas (futuro)
@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 try:
-    import google.generativeai as genai
+    from google import genai
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
@@ -45,16 +45,17 @@ class GeminiFallbackService:
     def __init__(self, api_key: Optional[str] = None):
         if not GEMINI_AVAILABLE:
             raise ImportError(
-                "google-generativeai no instalado. "
-                "Ejecuta: pip install google-generativeai"
+                "google-genai no instalado. "
+                "Ejecuta: pip install google-genai"
             )
 
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
         if not self.api_key:
             raise ValueError("GEMINI_API_KEY no configurada en .env")
 
-        genai.configure(api_key=self.api_key)
-        self.model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        # Inicializar cliente con nueva API
+        self.client = genai.Client(api_key=self.api_key)
+        self.model_name = 'gemini-2.5-flash'  # ← Cambiar aquí para otro modelo
 
     def recuperar_campos_faltantes(
         self,
@@ -63,11 +64,11 @@ class GeminiFallbackService:
         datos_actuales: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Recupera campos con baja confianza usando Gemini.
+        Recupera campos con media o baja confianza usando Gemini.
 
         Args:
             texto_ocr: Texto completo del OCR
-            campos_baja_confianza: Lista de nombres de campos con BAJA confianza
+            campos_baja_confianza: Lista de nombres de campos con MEDIA o BAJA confianza
             datos_actuales: Datos ya extraídos (para contexto)
 
         Returns:
@@ -89,12 +90,13 @@ class GeminiFallbackService:
         )
 
         try:
-            # Llamar a Gemini con timeout
-            response = self.model.generate_content(
-                prompt,
-                generation_config={
-                    "temperature": 0.1,  # Baja temperatura = más determinístico
-                    "max_output_tokens": 2000,
+            # Llamar a Gemini con nueva API
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config={
+                    "temperature": 0.0,  # Baja temperatura = más determinístico
+                    "max_output_tokens": 4000,  # Aumentado para manejar respuestas largas
                 }
             )
 
@@ -210,6 +212,30 @@ RESPONDE SOLO CON JSON EN ESTE FORMATO:
 JSON:"""
 
         return prompt
+
+    def generate_content(self, prompt: str) -> str:
+        """
+        Método genérico para llamar a Gemini (usado por extracción híbrida).
+
+        Args:
+            prompt: Texto del prompt a enviar
+
+        Returns:
+            str: Respuesta de Gemini en texto plano
+        """
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config={
+                    "temperature": 0.0,
+                    "max_output_tokens": 4000,  # Aumentado para manejar respuestas largas
+                }
+            )
+            return response.text.strip()
+        except Exception as e:
+            print(f"⚠️ Error llamando a Gemini: {e}")
+            return ""
 
 
 # Singleton para reutilizar conexión
