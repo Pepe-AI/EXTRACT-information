@@ -589,11 +589,11 @@ PLANTILLA JSON (campos obligatorios):
             "nombre": "NOMBRE",
             "tipo": "empresa" o "persona",
             "actua_por": "derecho propio" o "representación",
-            "estado_civil": "estado",
-            "tipo_sociedad": null,
-            "edad": null,
-            "rfc": false,
-            "curp": false,
+            "estado_civil": false,  // false si no existe
+            "tipo_sociedad": false,  // false si no existe
+            "edad": false,           // false si no existe
+            "rfc": false,            // false si no existe
+            "curp": false,           // false si no existe
             "representante": null o {objeto}
         }
     ],
@@ -602,9 +602,15 @@ PLANTILLA JSON (campos obligatorios):
     "curps": []
 }
 
-REGLAS:
-- Si titular/adquiriente es EMPRESA → representante es OBLIGATORIO
-- Si titular/adquiriente es PERSONA → representante es OPCIONAL
+REGLAS IMPORTANTES:
+===================
+1. TITULARES: Solo necesitan nombre, tipo, actua_por, representante
+2. ADQUIRIENTES: Además de lo anterior, incluyen estado_civil, tipo_sociedad, edad, rfc, curp
+3. Si titular/adquiriente es EMPRESA → representante es OBLIGATORIO
+4. Si titular/adquiriente es PERSONA → representante es OPCIONAL
+5. Para campos estado_civil, tipo_sociedad, edad, rfc, curp en adquirientes:
+   - Si NO existen en el documento → usa "false"
+   - Si SÍ existen → extrae el valor
 
 """
 

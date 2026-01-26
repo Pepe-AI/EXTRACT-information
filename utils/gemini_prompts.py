@@ -82,28 +82,29 @@ INSTRUCCIONES:
    - Si actúa por derecho propio → representante: null
    - Si tiene apoderado/gestor → extraer nombre y en_calidad
 
-⚠️ REGLA CRÍTICA - MÚLTIPLES REPRESENTANTES:
-=============================================
+⚠️ REGLA CRÍTICA - REPRESENTANTE:
+==================================
 
-Si hay VARIOS representantes (ej: "ROSA GUZMAN Y MARGARITA FLORES"), debes crear OBJETOS SEPARADOS:
+Cada titular/adquiriente puede tener MÁXIMO UN representante.
 
-INCORRECTO ❌:
+REGLAS:
+- Si tipo = "empresa" → representante es OBLIGATORIO
+- Si tipo = "persona" → representante es OPCIONAL (puede ser null)
+
+Si el documento menciona varios representantes, toma SOLO EL PRIMERO.
+
+FORMATO CORRECTO:
 {{
-  "nombre": "ROSA GUZMAN Y MARGARITA FLORES",
-  "en_calidad": "apoderadas"
+  "representante": {{
+    "nombre": "NOMBRE COMPLETO DEL REPRESENTANTE",
+    "en_calidad": "apoderado legal"
+  }}
 }}
 
-CORRECTO ✅:
-[
-  {{
-    "nombre": "ROSA ANGELICA GUZMAN DELGADO",
-    "en_calidad": "apoderada legal"
-  }},
-  {{
-    "nombre": "MARGARITA MARIA FLORES VILLASEÑOR",
-    "en_calidad": "apoderada legal"
-  }}
-]
+O si no tiene representante:
+{{
+  "representante": null
+}}
 
 PLANTILLA DE RESPUESTA (JSON):
 ==============================
@@ -112,26 +113,18 @@ PLANTILLA DE RESPUESTA (JSON):
   "titular": {{
     "nombre": "NOMBRE COMPLETO DEL VENDEDOR",
     "tipo": "empresa" o "persona",
-    "representantes": null o [
-      {{
-        "nombre": "NOMBRE DEL REPRESENTANTE 1",
-        "en_calidad": "apoderado legal"
-      }},
-      {{
-        "nombre": "NOMBRE DEL REPRESENTANTE 2",
-        "en_calidad": "apoderado legal"
-      }}
-    ]
+    "representante": null o {{
+      "nombre": "NOMBRE DEL REPRESENTANTE",
+      "en_calidad": "apoderado legal"
+    }}
   }},
   "adquiriente": {{
     "nombre": "NOMBRE COMPLETO DEL COMPRADOR",
     "tipo": "empresa" o "persona",
-    "representantes": null o [
-      {{
-        "nombre": "NOMBRE DEL REPRESENTANTE",
-        "en_calidad": "gestor de negocios"
-      }}
-    ]
+    "representante": null o {{
+      "nombre": "NOMBRE DEL REPRESENTANTE",
+      "en_calidad": "gestor de negocios"
+    }}
   }}
 }}
 
@@ -147,27 +140,24 @@ JSON correcto:
   "titular": {{
     "nombre": "INSTITUTO NACIONAL DEL SUELO SUSTENTABLE (INSUS)",
     "tipo": "empresa",
-    "representantes": [
-      {{
-        "nombre": "ERNESTO PADILLA ACEVES",
-        "en_calidad": "Representante Regional"
-      }}
-    ]
+    "representante": {{
+      "nombre": "ERNESTO PADILLA ACEVES",
+      "en_calidad": "Representante Regional"
+    }}
   }},
   "adquiriente": {{
     "nombre": "ANGELBERTA PÉREZ SOTO",
     "tipo": "persona",
-    "representantes": null
+    "representante": null
   }}
 }}
 
 REGLAS IMPORTANTES:
 ===================
 - Extrae nombres COMPLETOS (sin títulos como Lic., Dr., Ing.)
-- Si es EMPRESA → representantes es OBLIGATORIO (array de objetos)
-- Si es PERSONA sin apoderado → representantes: null
-- Si hay MÚLTIPLES representantes → crea un objeto SEPARADO para cada uno
-- NUNCA concatenes nombres con "Y" o "y" → separa en objetos distintos
+- Si es EMPRESA → representante es OBLIGATORIO (objeto)
+- Si es PERSONA sin apoderado → representante: null
+- Si el documento menciona MÚLTIPLES representantes → toma SOLO EL PRIMERO
 - Usa null si no encuentras un dato (NO uses "N/A" o "NO ENCONTRADO")
 
 DOCUMENTO A EXTRAER:
@@ -218,7 +208,13 @@ Extrae los siguientes campos del documento:
 Para cada uno extrae:
 - Nombre completo
 - Tipo (empresa/persona)
-- Representante (si existe): nombre, en_calidad
+- Representante (si existe): UN SOLO objeto con nombre, en_calidad, escritura, fecha_poder
+
+⚠️ REGLA REPRESENTANTE:
+- Cada titular/adquiriente puede tener MÁXIMO UN representante
+- Si tipo = "empresa" → representante es OBLIGATORIO
+- Si tipo = "persona" → representante es OPCIONAL (puede ser null)
+- Si hay varios representantes mencionados → toma SOLO EL PRIMERO
 
 ═══════════════════════════════════════════════════════════════
 2. MUNICIPIO DEL INMUEBLE
@@ -277,12 +273,24 @@ PLANTILLA DE RESPUESTA (JSON):
     "tipo": "empresa" o "persona",
     "representante": null o {{
       "nombre": "NOMBRE REPRESENTANTE",
-      "en_calidad": "cargo"
+      "en_calidad": "cargo",
+      "escritura": null,
+      "fecha_poder": null
     }}
   }},
   "municipio": "NOMBRE MUNICIPIO" o null,
   "monto_operacion": "$X,XXX.XX" o null
 }}
+
+REGLAS IMPORTANTES:
+===================
+- Extrae nombres COMPLETOS (sin títulos como Lic., Dr., Ing.)
+- Si es EMPRESA → representante es OBLIGATORIO (objeto)
+- Si es PERSONA sin apoderado → representante: null
+- Si hay MÚLTIPLES representantes mencionados → toma SOLO EL PRIMERO
+- Usa null si no encuentras un dato (NO uses "N/A" o "NO ENCONTRADO")
+- Municipio del INMUEBLE, NO de la notaría
+- Monto de VENTA, NO impuestos
 
 DOCUMENTO A EXTRAER:
 ===================

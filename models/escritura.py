@@ -70,12 +70,12 @@ class AdquirienteFlexible(BaseModel):
     nombre: Optional[str] = Field(default=NO_ENCONTRADO)
     tipo: Optional[str] = Field(default=None, description="Tipo: 'empresa' o 'persona'")
     actua_por: Optional[str] = Field(default=NO_ENCONTRADO)
-    estado_civil: Optional[str] = Field(default=NO_ENCONTRADO)
-    tipo_sociedad: Optional[str] = Field(default=None)
-    edad: Optional[int] = Field(default=None)
-    rfc: Optional[Union[str, bool]] = Field(default=False)
-    curp: Optional[Union[str, bool]] = Field(default=False)
-    representante: Optional[RepresentanteFlexible] = Field(default=None)
+    estado_civil: Optional[Union[str, bool]] = Field(default=False, description="Estado civil o false si no existe")
+    tipo_sociedad: Optional[Union[str, bool]] = Field(default=False, description="Tipo de sociedad conyugal o false si no existe")
+    edad: Optional[Union[int, bool]] = Field(default=False, description="Edad o false si no existe")
+    rfc: Optional[Union[str, bool]] = Field(default=False, description="RFC o false si no existe")
+    curp: Optional[Union[str, bool]] = Field(default=False, description="CURP o false si no existe")
+    representante: Optional[RepresentanteFlexible] = Field(default=None, description="Representante o null si no existe")
 
     model_config = {"extra": "allow"}
 

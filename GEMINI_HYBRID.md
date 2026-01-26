@@ -52,7 +52,7 @@ DeepSeek tiene <40% precisión en campos contextuales como titular/adquiriente (
 
 ## 🎯 **VERSIONES DE EXTRACCIÓN GEMINI**
 
-### **Versión 1: CRÍTICO** (Actual - Implementada)
+### **Versión 1: CRÍTICO** (Opcional)
 
 **Campos extraídos:**
 - `titular.nombre` - Nombre del vendedor
@@ -64,30 +64,38 @@ DeepSeek tiene <40% precisión en campos contextuales como titular/adquiriente (
 
 **Costo aproximado:** $0.0009 por documento (~3000 tokens)
 
-**Uso:**
+**Para activar:**
 ```python
-extractor = EscrituraExtractor()
-result = extractor.extract("escritura.pdf")
-# Gemini se ejecuta automáticamente en PASO 6.6
+# En extractor.py línea ~464:
+gemini_data = self._extraer_con_gemini(ocr_text, nivel="critico")
 ```
 
 ---
 
-### **Versión 2: EXPANDIDO** (Futura)
+### **Versión 2: EXPANDIDO** ✅ (Actual - Implementada)
 
-**Campos adicionales:**
-- `municipio` - Municipio del inmueble
-- `monto_operacion` - Precio de venta
-- `representante.escritura` - Número del poder
-- `representante.fecha_poder` - Fecha del poder
+**Campos extraídos:**
+- ✅ `titular.nombre` - Nombre del vendedor
+- ✅ `titular.tipo` - empresa/persona
+- ✅ `titular.representantes` - Array de representantes con escritura/fecha_poder
+- ✅ `adquiriente.nombre` - Nombre del comprador
+- ✅ `adquiriente.tipo` - empresa/persona
+- ✅ `adquiriente.representantes` - Array de representantes
+- ✅ `municipio` - Municipio del inmueble
+- ✅ `monto_operacion` - Precio de venta
+- ✅ `representante.escritura` - Número del poder
+- ✅ `representante.fecha_poder` - Fecha del poder
 
 **Costo aproximado:** $0.0012 por documento (~4000 tokens)
 
-**Para activar:**
+**Uso:**
 ```python
-# En extractor.py línea ~465:
-gemini_data = self._extraer_con_gemini(ocr_text, nivel="expandido")
+extractor = EscrituraExtractor()
+result = extractor.extract("escritura.pdf")
+# Gemini v2 se ejecuta automáticamente en PASO 6.6
 ```
+
+**Activado por defecto en:** `extractor.py:464`
 
 ---
 
@@ -259,8 +267,8 @@ services/gemini_service.py      ← Servicio de Gemini
 ## 🚀 **PRÓXIMOS PASOS**
 
 1. ✅ **Versión 1 Crítico** - Implementada
-2. ⏳ **Validar con datos reales** - Pendiente
-3. ⏳ **Versión 2 Expandido** - Cuando v1 funcione bien
+2. ✅ **Versión 2 Expandido** - Implementada (ACTUAL)
+3. ⏳ **Validar con datos reales** - Pendiente
 4. ⏳ **Versión 3 Completo** - Cuando v2 funcione bien
 5. ⏳ **Optimización de costos** - Cache de Gemini para documentos similares
 
@@ -273,9 +281,9 @@ Para 1000 documentos/mes:
 | Configuración | Costo/doc | Costo total | Precisión |
 |---------------|-----------|-------------|-----------|
 | Solo DeepSeek | $0.0003 | $0.30 | ~30% |
-| **Híbrido v1** | **$0.0012** | **$1.20** | **~95%** |
-| Híbrido v2 | $0.0015 | $1.50 | ~95% |
-| Híbrido v3 | $0.0018 | $1.80 | ~98% |
+| Híbrido v1 | $0.0009 | $0.90 | ~95% |
+| **Híbrido v2** | **$0.0012** | **$1.20** | **~95%** ✅ |
+| Híbrido v3 | $0.0015 | $1.50 | ~98% |
 | Solo Gemini | $0.003 | $3.00 | ~98% |
 
-**Recomendación:** Híbrido v1 ofrece el mejor balance costo/precisión.
+**Recomendación:** Híbrido v2 ofrece el mejor balance costo/precisión (ACTUAL).

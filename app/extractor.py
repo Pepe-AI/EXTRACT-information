@@ -456,12 +456,12 @@ class EscrituraExtractor:
                                 print(f"   ✅ Fecha de poder: {fecha_poder_val}")
 
             # =================================================================
-            # PASO 6.6: EXTRACCIÓN GEMINI (Campos críticos <90%)
+            # PASO 6.6: EXTRACCIÓN GEMINI (Campos expandidos <90%)
             # =================================================================
-            print(f"\n🔮 Paso 6.6: Extracción Gemini (campos críticos)...")
+            print(f"\n🔮 Paso 6.6: Extracción Gemini (expandido: titular/adquiriente/municipio/monto)...")
 
-            # Extraer campos críticos con Gemini (titular/adquiriente)
-            gemini_data = self._extraer_con_gemini(ocr_text, nivel="critico")
+            # Extraer campos expandidos con Gemini v2 (titular/adquiriente + municipio + monto + poder)
+            gemini_data = self._extraer_con_gemini(ocr_text, nivel="expandido")
 
             # Mergear Gemini con DeepSeek (prioridad Gemini para titular/adquiriente)
             if gemini_data and json_data:
@@ -887,6 +887,97 @@ class EscrituraExtractor:
         thinking_final = "\n---\n".join(all_thinking) if all_thinking else None
         return json_data, self.config.max_retries, False, thinking_final
 
+    def _separar_representantes_concatenados(self, json_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        POST-PROCESSING para separar entidades concatenadas (titulares, adquirientes, representantes).
+
+        Gemini a veces ignora las instrucciones y devuelve nombres concatenados:
+
+        CASO 1 - Titulares/Adquirientes concatenados:
+        {
+          "titular": {
+            "nombre": "NORMA CELIS y GABRIEL VIZCARRA",  ← 2 personas en 1
+            "tipo": "persona"
+          }
+        }
+        → Se convierte en array de 2 titulares separados
+
+        CASO 2 - Representantes concatenados:
+        {
+          "representante": {
+            "nombre": "ROSA GUZMAN Y MARGARITA FLORES",
+            "en_calidad": "apoderadas legales"
+          }
+        }
+        → Se convierte en array de 2 representantes separados
+        """
+        import re
+        import copy
+
+        def procesar_entidad(entidad: Dict[str, Any], tipo_entidad: str = "titular") -> list:
+            """
+            Procesa titular o adquiriente para separar nombres concatenados.
+
+            SOLO separa titulares/adquirientes concatenados en el nombre principal.
+            NO modifica representantes (ya vienen correctamente de Gemini).
+
+            Retorna:
+            - Lista de entidades si detecta concatenación en nombre principal
+            - Lista de 1 elemento si no hay concatenación
+            """
+            if not entidad:
+                return [entidad]
+
+            # Detectar concatenación en el NOMBRE PRINCIPAL (titular/adquiriente)
+            nombre_principal = entidad.get("nombre", "")
+            if re.search(r'\s+[Yy]\s+', nombre_principal):
+                # Hay concatenación de titulares/adquirientes
+                nombres = re.split(r'\s+[Yy]\s+', nombre_principal)
+                nombres = [n.strip() for n in nombres if n.strip()]
+
+                # Crear entidades separadas con DEEP COPY para evitar compartir referencias
+                entidades_separadas = []
+                for nombre_individual in nombres:
+                    entidad_copia = copy.deepcopy(entidad)  # DEEP COPY para objetos anidados
+                    entidad_copia["nombre"] = nombre_individual
+                    entidades_separadas.append(entidad_copia)
+
+                print(f"   🔧 Separados {len(nombres)} {tipo_entidad}s concatenados")
+                return entidades_separadas
+
+            # Sin concatenación, retornar como lista de 1 elemento
+            return [entidad]
+
+        # Procesar titular (puede retornar múltiples titulares concatenados)
+        if "titular" in json_data and json_data["titular"]:
+            if isinstance(json_data["titular"], dict):
+                entidades = procesar_entidad(json_data["titular"], "titular")
+                if len(entidades) == 1:
+                    # Un solo titular - mantener formato singular
+                    json_data["titular"] = entidades[0]
+                else:
+                    # Múltiples titulares - convertir a formato plural
+                    json_data["titulares"] = entidades
+                    del json_data["titular"]
+            else:
+                print(f"   ⚠️ POST-PROCESSING: 'titular' no es un diccionario, ignorando: {type(json_data['titular'])}")
+
+        # Procesar adquiriente (puede retornar múltiples adquirientes concatenados)
+        if "adquiriente" in json_data and json_data["adquiriente"]:
+            if isinstance(json_data["adquiriente"], dict):
+                entidades = procesar_entidad(json_data["adquiriente"], "adquiriente")
+                if len(entidades) == 1:
+                    # Un solo adquiriente - mantener formato singular
+                    json_data["adquiriente"] = entidades[0]
+                else:
+                    # Múltiples adquirientes - convertir a formato plural
+                    json_data["adquirientes"] = entidades
+                    del json_data["adquiriente"]
+            else:
+                print(f"   ⚠️ POST-PROCESSING: 'adquiriente' no es un diccionario, ignorando: {type(json_data['adquiriente'])}")
+
+        return json_data
+
     def _extraer_con_gemini(
         self,
         ocr_text: str,
@@ -954,6 +1045,10 @@ class EscrituraExtractor:
 
             # Parsear respuesta JSON
             json_data = parse_gemini_response(response)
+
+            # POST-PROCESSING: Separar representantes concatenados
+            if json_data:
+                json_data = self._separar_representantes_concatenados(json_data)
 
             if json_data:
                 # Mostrar resumen de lo extraído
@@ -1032,124 +1127,164 @@ class EscrituraExtractor:
         # MERGE DE TITULAR (prioridad Gemini para nombre/tipo/representante)
         # ====================================================================
 
-        if "titular" in gemini_data and gemini_data["titular"]:
-            gemini_titular = gemini_data["titular"]
+        # Gemini puede retornar "titular" (singular) o "titulares" (plural)
+        gemini_titulares_list = []
+        if "titulares" in gemini_data and gemini_data["titulares"]:
+            # Caso 1: Gemini detectó múltiples titulares concatenados (ya separados)
+            raw_list = gemini_data["titulares"]
+            # VALIDACIÓN: Filtrar solo elementos que sean diccionarios (ignorar strings u otros tipos)
+            if isinstance(raw_list, list):
+                gemini_titulares_list = [t for t in raw_list if isinstance(t, dict)]
+                if len(gemini_titulares_list) != len(raw_list):
+                    print(f"   ⚠️ Gemini retornó {len(raw_list)} elementos, pero solo {len(gemini_titulares_list)} son diccionarios válidos")
+                else:
+                    print(f"   🔧 Gemini retornó {len(gemini_titulares_list)} titulares separados")
+            else:
+                print(f"   ⚠️ Gemini retornó 'titulares' pero no es una lista: {type(raw_list)}")
+        elif "titular" in gemini_data and gemini_data["titular"]:
+            # Caso 2: Gemini retornó un solo titular
+            if isinstance(gemini_data["titular"], dict):
+                gemini_titulares_list = [gemini_data["titular"]]
+            else:
+                print(f"   ⚠️ Gemini retornó 'titular' pero no es un diccionario: {type(gemini_data['titular'])}")
 
-            # Si DeepSeek tiene titulares, actualizar el primero
+        if gemini_titulares_list:
+            # Si DeepSeek tiene titulares, reemplazarlos con los de Gemini
             if "titulares" in resultado and resultado["titulares"]:
-                deepseek_titular = resultado["titulares"][0]
-
-                # PRIORIDAD GEMINI: nombre
-                if gemini_titular.get("nombre"):
-                    deepseek_titular["nombre"] = gemini_titular["nombre"]
-                    print(f"   ✅ Titular.nombre ← Gemini")
-
-                # PRIORIDAD GEMINI: tipo
-                if gemini_titular.get("tipo"):
-                    deepseek_titular["tipo"] = gemini_titular["tipo"]
-                    print(f"   ✅ Titular.tipo ← Gemini ({gemini_titular['tipo']})")
-
-                # PRIORIDAD GEMINI: representantes (puede ser array o dict)
-                if "representantes" in gemini_titular:
-                    reps = gemini_titular["representantes"]
-                    if isinstance(reps, list) and len(reps) > 0:
-                        # Múltiples representantes → convertir a formato interno
-                        # Por ahora, tomamos el primero para mantener compatibilidad
-                        deepseek_titular["representante"] = reps[0]
-                        deepseek_titular["actua_por"] = "representación"
-                        print(f"   ✅ Titular.representante ← Gemini ({reps[0].get('nombre', 'N/A')[:30]}...)")
-                        if len(reps) > 1:
-                            print(f"   ⚠️ Detectados {len(reps)} representantes (usando primero)")
-                    elif reps is None:
-                        deepseek_titular["representante"] = None
-                        deepseek_titular["actua_por"] = "derecho propio"
-                        print(f"   ✅ Titular.representante ← Gemini (null)")
-                elif "representante" in gemini_titular:
-                    # Formato antiguo (dict único)
-                    deepseek_titular["representante"] = gemini_titular["representante"]
-                    if gemini_titular["representante"]:
-                        deepseek_titular["actua_por"] = "representación"
-                        rep_nombre = gemini_titular["representante"].get("nombre", "N/A")
-                        print(f"   ✅ Titular.representante ← Gemini ({rep_nombre[:30]}...)")
+                # Reemplazar completamente los titulares de DeepSeek con los de Gemini
+                for i, gemini_titular in enumerate(gemini_titulares_list):
+                    if i < len(resultado["titulares"]):
+                        deepseek_titular = resultado["titulares"][i]
                     else:
-                        deepseek_titular["actua_por"] = "derecho propio"
-                        print(f"   ✅ Titular.representante ← Gemini (null)")
+                        # Gemini encontró más titulares que DeepSeek
+                        deepseek_titular = {
+                            "nombre": "",
+                            "tipo": "persona",
+                            "actua_por": "derecho propio",
+                            "representante": None
+                        }
+                        resultado["titulares"].append(deepseek_titular)
+
+                    # PRIORIDAD GEMINI: nombre
+                    if gemini_titular.get("nombre"):
+                        deepseek_titular["nombre"] = gemini_titular["nombre"]
+                        print(f"   ✅ Titular[{i}].nombre ← Gemini")
+
+                    # PRIORIDAD GEMINI: tipo
+                    if gemini_titular.get("tipo"):
+                        deepseek_titular["tipo"] = gemini_titular["tipo"]
+                        print(f"   ✅ Titular[{i}].tipo ← Gemini ({gemini_titular['tipo']})")
+
+                    # PRIORIDAD GEMINI: representante (singular)
+                    if "representante" in gemini_titular:
+                        rep = gemini_titular["representante"]
+                        deepseek_titular["representante"] = rep
+                        if rep:
+                            deepseek_titular["actua_por"] = "representación"
+                            rep_nombre = rep.get("nombre", "N/A") if isinstance(rep, dict) else "N/A"
+                            print(f"   ✅ Titular[{i}].representante ← Gemini ({rep_nombre[:30]}...)")
+                        else:
+                            deepseek_titular["actua_por"] = "derecho propio"
+                            print(f"   ✅ Titular[{i}].representante ← Gemini (null)")
 
             else:
                 # DeepSeek no tiene titulares, crear desde Gemini
-                resultado["titulares"] = [{
-                    "nombre": gemini_titular.get("nombre"),
-                    "tipo": gemini_titular.get("tipo"),
-                    "actua_por": "representación" if gemini_titular.get("representante") else "derecho propio",
-                    "representante": gemini_titular.get("representante")
-                }]
-                print(f"   ✅ Titular completo ← Gemini (DeepSeek no lo tenía)")
+                resultado["titulares"] = []
+                for gemini_titular in gemini_titulares_list:
+                    resultado["titulares"].append({
+                        "nombre": gemini_titular.get("nombre"),
+                        "tipo": gemini_titular.get("tipo"),
+                        "actua_por": "representación" if gemini_titular.get("representante") else "derecho propio",
+                        "representante": gemini_titular.get("representante")
+                    })
+                print(f"   ✅ {len(gemini_titulares_list)} Titular(es) completo(s) ← Gemini (DeepSeek no lo tenía)")
 
         # ====================================================================
         # MERGE DE ADQUIRIENTE (prioridad Gemini para nombre/tipo/representante)
         # ====================================================================
 
-        if "adquiriente" in gemini_data and gemini_data["adquiriente"]:
-            gemini_adq = gemini_data["adquiriente"]
+        # Gemini puede retornar "adquiriente" (singular) o "adquirientes" (plural)
+        gemini_adquirientes_list = []
+        if "adquirientes" in gemini_data and gemini_data["adquirientes"]:
+            # Caso 1: Gemini detectó múltiples adquirientes concatenados (ya separados)
+            raw_list = gemini_data["adquirientes"]
+            # VALIDACIÓN: Filtrar solo elementos que sean diccionarios (ignorar strings u otros tipos)
+            if isinstance(raw_list, list):
+                gemini_adquirientes_list = [a for a in raw_list if isinstance(a, dict)]
+                if len(gemini_adquirientes_list) != len(raw_list):
+                    print(f"   ⚠️ Gemini retornó {len(raw_list)} elementos, pero solo {len(gemini_adquirientes_list)} son diccionarios válidos")
+                else:
+                    print(f"   🔧 Gemini retornó {len(gemini_adquirientes_list)} adquirientes separados")
+            else:
+                print(f"   ⚠️ Gemini retornó 'adquirientes' pero no es una lista: {type(raw_list)}")
+        elif "adquiriente" in gemini_data and gemini_data["adquiriente"]:
+            # Caso 2: Gemini retornó un solo adquiriente
+            if isinstance(gemini_data["adquiriente"], dict):
+                gemini_adquirientes_list = [gemini_data["adquiriente"]]
+            else:
+                print(f"   ⚠️ Gemini retornó 'adquiriente' pero no es un diccionario: {type(gemini_data['adquiriente'])}")
 
-            # Si DeepSeek tiene adquirientes, actualizar el primero
+        if gemini_adquirientes_list:
+            # Si DeepSeek tiene adquirientes, reemplazarlos con los de Gemini
             if "adquirientes" in resultado and resultado["adquirientes"]:
-                deepseek_adq = resultado["adquirientes"][0]
-
-                # PRIORIDAD GEMINI: nombre
-                if gemini_adq.get("nombre"):
-                    deepseek_adq["nombre"] = gemini_adq["nombre"]
-                    print(f"   ✅ Adquiriente.nombre ← Gemini")
-
-                # PRIORIDAD GEMINI: tipo
-                if gemini_adq.get("tipo"):
-                    deepseek_adq["tipo"] = gemini_adq["tipo"]
-                    print(f"   ✅ Adquiriente.tipo ← Gemini ({gemini_adq['tipo']})")
-
-                # PRIORIDAD GEMINI: representantes (puede ser array o dict)
-                if "representantes" in gemini_adq:
-                    reps = gemini_adq["representantes"]
-                    if isinstance(reps, list) and len(reps) > 0:
-                        # Múltiples representantes → convertir a formato interno
-                        deepseek_adq["representante"] = reps[0]
-                        deepseek_adq["actua_por"] = "representación"
-                        print(f"   ✅ Adquiriente.representante ← Gemini ({reps[0].get('nombre', 'N/A')[:30]}...)")
-                        if len(reps) > 1:
-                            print(f"   ⚠️ Detectados {len(reps)} representantes (usando primero)")
-                    elif reps is None:
-                        deepseek_adq["representante"] = None
-                        deepseek_adq["actua_por"] = "derecho propio"
-                        print(f"   ✅ Adquiriente.representante ← Gemini (null)")
-                elif "representante" in gemini_adq:
-                    # Formato antiguo (dict único)
-                    deepseek_adq["representante"] = gemini_adq["representante"]
-                    if gemini_adq["representante"]:
-                        deepseek_adq["actua_por"] = "representación"
-                        rep_nombre = gemini_adq["representante"].get("nombre", "N/A")
-                        print(f"   ✅ Adquiriente.representante ← Gemini ({rep_nombre[:30]}...)")
+                # Reemplazar completamente los adquirientes de DeepSeek con los de Gemini
+                for i, gemini_adq in enumerate(gemini_adquirientes_list):
+                    if i < len(resultado["adquirientes"]):
+                        deepseek_adq = resultado["adquirientes"][i]
                     else:
-                        deepseek_adq["actua_por"] = "derecho propio"
-                        print(f"   ✅ Adquiriente.representante ← Gemini (null)")
+                        # Gemini encontró más adquirientes que DeepSeek
+                        deepseek_adq = {
+                            "nombre": "",
+                            "tipo": "persona",
+                            "actua_por": "derecho propio",
+                            "estado_civil": None,
+                            "representante": None
+                        }
+                        resultado["adquirientes"].append(deepseek_adq)
 
-                # Gemini también puede traer estado_civil (versiones futuras)
-                if gemini_adq.get("estado_civil"):
-                    deepseek_adq["estado_civil"] = gemini_adq["estado_civil"]
-                    print(f"   ✅ Adquiriente.estado_civil ← Gemini")
+                    # PRIORIDAD GEMINI: nombre
+                    if gemini_adq.get("nombre"):
+                        deepseek_adq["nombre"] = gemini_adq["nombre"]
+                        print(f"   ✅ Adquiriente[{i}].nombre ← Gemini")
+
+                    # PRIORIDAD GEMINI: tipo
+                    if gemini_adq.get("tipo"):
+                        deepseek_adq["tipo"] = gemini_adq["tipo"]
+                        print(f"   ✅ Adquiriente[{i}].tipo ← Gemini ({gemini_adq['tipo']})")
+
+                    # PRIORIDAD GEMINI: representante (singular)
+                    if "representante" in gemini_adq:
+                        rep = gemini_adq["representante"]
+                        deepseek_adq["representante"] = rep
+                        if rep:
+                            deepseek_adq["actua_por"] = "representación"
+                            rep_nombre = rep.get("nombre", "N/A") if isinstance(rep, dict) else "N/A"
+                            print(f"   ✅ Adquiriente[{i}].representante ← Gemini ({rep_nombre[:30]}...)")
+                        else:
+                            deepseek_adq["actua_por"] = "derecho propio"
+                            print(f"   ✅ Adquiriente[{i}].representante ← Gemini (null)")
+
+                    # Gemini también puede traer estado_civil (versiones futuras)
+                    if gemini_adq.get("estado_civil"):
+                        deepseek_adq["estado_civil"] = gemini_adq["estado_civil"]
+                        print(f"   ✅ Adquiriente[{i}].estado_civil ← Gemini")
 
             else:
                 # DeepSeek no tiene adquirientes, crear desde Gemini
-                resultado["adquirientes"] = [{
-                    "nombre": gemini_adq.get("nombre"),
-                    "tipo": gemini_adq.get("tipo"),
-                    "actua_por": "representación" if gemini_adq.get("representante") else "derecho propio",
-                    "estado_civil": gemini_adq.get("estado_civil"),
-                    "representante": gemini_adq.get("representante"),
-                    "rfc": gemini_adq.get("rfc", False),
-                    "curp": gemini_adq.get("curp", False),
-                    "tipo_sociedad": gemini_adq.get("tipo_sociedad"),
-                    "edad": gemini_adq.get("edad"),
-                }]
-                print(f"   ✅ Adquiriente completo ← Gemini (DeepSeek no lo tenía)")
+                resultado["adquirientes"] = []
+                for gemini_adq in gemini_adquirientes_list:
+                    resultado["adquirientes"].append({
+                        "nombre": gemini_adq.get("nombre"),
+                        "tipo": gemini_adq.get("tipo"),
+                        "actua_por": "representación" if gemini_adq.get("representante") else "derecho propio",
+                        "estado_civil": gemini_adq.get("estado_civil"),
+                        "representante": gemini_adq.get("representante"),
+                        "rfc": gemini_adq.get("rfc", False),
+                        "curp": gemini_adq.get("curp", False),
+                        "tipo_sociedad": gemini_adq.get("tipo_sociedad"),
+                        "edad": gemini_adq.get("edad"),
+                    })
+                print(f"   ✅ {len(gemini_adquirientes_list)} Adquiriente(s) completo(s) ← Gemini (DeepSeek no lo tenía)")
 
         # ====================================================================
         # MERGE DE CAMPOS NUMÉRICOS (si Gemini nivel expandido/completo)
@@ -1162,6 +1297,48 @@ class EscrituraExtractor:
         if "monto_operacion" in gemini_data and gemini_data["monto_operacion"]:
             resultado["monto_operacion"] = gemini_data["monto_operacion"]
             print(f"   ✅ Monto ← Gemini")
+
+        # ====================================================================
+        # MERGE DE DATOS DEL PODER (escritura/fecha_poder) en representantes
+        # ====================================================================
+
+        # Mergear datos del poder en titular
+        if "titular" in gemini_data and gemini_data["titular"]:
+            gemini_rep = gemini_data["titular"].get("representante")
+            if gemini_rep and isinstance(gemini_rep, dict):
+                # Buscar titular en resultado
+                if "titulares" in resultado and resultado["titulares"]:
+                    for titular in resultado["titulares"]:
+                        rep = titular.get("representante")
+                        if rep and isinstance(rep, dict):
+                            # Mergear escritura
+                            if gemini_rep.get("escritura") and not rep.get("escritura"):
+                                rep["escritura"] = gemini_rep["escritura"]
+                                print(f"   ✅ Titular.representante.escritura ← Gemini ({gemini_rep['escritura']})")
+
+                            # Mergear fecha_poder
+                            if gemini_rep.get("fecha_poder") and not rep.get("fecha_poder"):
+                                rep["fecha_poder"] = gemini_rep["fecha_poder"]
+                                print(f"   ✅ Titular.representante.fecha_poder ← Gemini ({gemini_rep['fecha_poder']})")
+
+        # Mergear datos del poder en adquiriente
+        if "adquiriente" in gemini_data and gemini_data["adquiriente"]:
+            gemini_rep = gemini_data["adquiriente"].get("representante")
+            if gemini_rep and isinstance(gemini_rep, dict):
+                # Buscar adquiriente en resultado
+                if "adquirientes" in resultado and resultado["adquirientes"]:
+                    for adq in resultado["adquirientes"]:
+                        rep = adq.get("representante")
+                        if rep and isinstance(rep, dict):
+                            # Mergear escritura
+                            if gemini_rep.get("escritura") and not rep.get("escritura"):
+                                rep["escritura"] = gemini_rep["escritura"]
+                                print(f"   ✅ Adquiriente.representante.escritura ← Gemini ({gemini_rep['escritura']})")
+
+                            # Mergear fecha_poder
+                            if gemini_rep.get("fecha_poder") and not rep.get("fecha_poder"):
+                                rep["fecha_poder"] = gemini_rep["fecha_poder"]
+                                print(f"   ✅ Adquiriente.representante.fecha_poder ← Gemini ({gemini_rep['fecha_poder']})")
 
         return resultado
 
