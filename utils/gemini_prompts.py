@@ -243,6 +243,14 @@ Extrae los siguientes campos del documento:
 - TITULAR: nombre, tipo, representante
 - ADQUIRIENTE: nombre, tipo, representante, estado_civil, rfc, curp, edad, tipo_sociedad
 
+⚠️ REGLA MÚLTIPLES ADQUIRIENTES:
+- Si detectas MÚLTIPLES ADQUIRIENTES (ejemplo: "ANTONIO QUINTERO FLORES y SILVIA SÁNCHEZ SÁNCHEZ")
+- NO los concatenes en un solo objeto
+- Crea un objeto SEPARADO para cada adquiriente en el array "adquirientes"
+- Extrae el RFC, CURP y edad de CADA PERSONA por separado
+- Busca en la sección "FE NOTARIAL" o "COMPARECIENTES" donde se listan los RFC/CURP de cada persona
+- Asigna el RFC/CURP correcto a cada persona (busca el RFC/CURP cerca del nombre de cada persona)
+
 ⚠️ REGLA REPRESENTANTE:
 - Cada titular/adquiriente puede tener MÁXIMO UN representante
 - Si tipo = "empresa" → representante es OBLIGATORIO
@@ -305,21 +313,23 @@ PLANTILLA DE RESPUESTA (JSON):
       "fecha_poder": "15/4/2020"
     }}
   }},
-  "adquiriente": {{
-    "nombre": "NOMBRE COMPRADOR",
-    "tipo": "empresa" o "persona",
-    "estado_civil": "..." o false,
-    "rfc": "..." o false,
-    "curp": "..." o false,
-    "edad": X o false,
-    "tipo_sociedad": "..." o false,
-    "representante": null o {{
-      "nombre": "NOMBRE REPRESENTANTE",
-      "en_calidad": "cargo",
-      "escritura": null,
-      "fecha_poder": null
+  "adquirientes": [
+    {{
+      "nombre": "NOMBRE COMPRADOR 1",
+      "tipo": "empresa" o "persona",
+      "estado_civil": "..." o false,
+      "rfc": "..." o false,
+      "curp": "..." o false,
+      "edad": X o false,
+      "tipo_sociedad": "..." o false,
+      "representante": null o {{
+        "nombre": "NOMBRE REPRESENTANTE",
+        "en_calidad": "cargo",
+        "escritura": null,
+        "fecha_poder": null
+      }}
     }}
-  }},
+  ],
   "municipio": "NOMBRE MUNICIPIO" o null,
   "monto_operacion": "$X,XXX.XX" o null
 }}
@@ -331,7 +341,9 @@ REGLAS IMPORTANTES:
 - Si es PERSONA sin apoderado → representante: null
 - Si hay MÚLTIPLES representantes mencionados → toma SOLO EL PRIMERO
 - TITULAR: SOLO extrae nombre, tipo, representante (NO rfc, curp, edad, estado_civil, tipo_sociedad)
-- ADQUIRIENTE: Extrae rfc, curp, edad, estado_civil, tipo_sociedad SOLO SI APARECEN (sino usa false)
+- ADQUIRIENTES: SIEMPRE retorna como ARRAY (incluso si es solo 1 persona)
+- Si hay MÚLTIPLES ADQUIRIENTES (ejemplo: "ANTONIO y SILVIA") → crea un objeto separado para CADA UNO
+- Extrae rfc, curp, edad, estado_civil, tipo_sociedad de CADA adquiriente SOLO SI APARECEN (sino usa false)
 - Usa null para representante/municipio/monto, usa false para campos de adquiriente que no existan
 - Municipio del INMUEBLE, NO de la notaría
 - Monto de VENTA, NO impuestos

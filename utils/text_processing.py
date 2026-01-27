@@ -75,7 +75,7 @@ HEADER_PATTERNS = [
 def clean_ocr_text(text: str) -> str:
     """
     Limpia texto extraído por OCR de documentos notariales.
-    
+
     PROCESO:
     ========
     1. Normalizar saltos de línea
@@ -83,16 +83,16 @@ def clean_ocr_text(text: str) -> str:
     3. Eliminar encabezados repetidos
     4. Unir palabras cortadas
     5. Normalizar espacios
-    
+
     Args:
         text: Texto crudo del OCR
-        
+
     Returns:
         Texto limpio y normalizado
     """
     if not text:
         return ""
-    
+
     # Normalizar saltos de línea
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     
@@ -119,26 +119,26 @@ def clean_ocr_text(text: str) -> str:
             if re.search(pattern, stripped_line, re.IGNORECASE):
                 is_noise = True
                 break
-        
+
         if is_noise:
             continue
-        
+
         # Verificar si es encabezado repetido
         is_header = False
         for pattern in HEADER_PATTERNS:
             if re.search(pattern, stripped_line, re.IGNORECASE):
                 is_header = True
                 break
-        
+
         if is_header:
             if line_counts[stripped_line] > 1:
                 if stripped_line in seen_headers:
                     continue
                 else:
                     seen_headers.add(stripped_line)
-        
+
         cleaned_lines.append(stripped_line)
-    
+
     # Unir palabras cortadas
     processed_text = ""
     for line in cleaned_lines:
@@ -146,7 +146,7 @@ def clean_ocr_text(text: str) -> str:
             processed_text += line[:-1]
         else:
             processed_text += line + " "
-    
+
     # Normalizar espacios
     processed_text = re.sub(r'\s+', ' ', processed_text).strip()
     

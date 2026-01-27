@@ -96,7 +96,7 @@ class GeminiFallbackService:
                 contents=prompt,
                 config={
                     "temperature": 0.0,  # Baja temperatura = más determinístico
-                    "max_output_tokens": 4000,  # Aumentado para manejar respuestas largas
+                    "max_output_tokens": 8000,  # Aumentado para múltiples adquirientes
                 }
             )
 
@@ -229,7 +229,7 @@ JSON:"""
                 contents=prompt,
                 config={
                     "temperature": 0.0,
-                    "max_output_tokens": 4000,  # Aumentado para manejar respuestas largas
+                    "max_output_tokens": 8000,  # Aumentado para múltiples adquirientes
                 }
             )
             return response.text.strip()
