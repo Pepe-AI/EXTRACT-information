@@ -93,11 +93,6 @@ class SistemaConfianza:
             datos_regex: Diccionario con datos extraídos por regex
         """
         for nombre, valor in datos_regex.items():
-            # Manejar listas especiales
-            if nombre in ["curps"]:
-                self._listas[nombre] = valor if isinstance(valor, list) else []
-                continue
-            
             # Solo agregar si tiene valor válido
             if valor not in VALORES_INVALIDOS:
                 self._datos[nombre] = valor

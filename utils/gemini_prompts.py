@@ -33,14 +33,15 @@ def build_gemini_prompt_critico(document_text: str) -> str:
     Gemini tiene mejor comprensión semántica de "vendedor vs comprador".
 
     Args:
-        document_text: Texto OCR del documento (hasta 5000 chars)
+        document_text: Texto OCR del documento
 
     Returns:
         str: Prompt optimizado para Gemini
     """
 
-    # Truncar documento si es muy largo (Gemini tiene límites de contexto)
-    texto_truncado = document_text[:5000] if len(document_text) > 5000 else document_text
+    # FIX 2026-01-26: NO truncar el texto. Gemini 2.5 Flash soporta 1M tokens
+    # Antes: texto_truncado = document_text[:5000]
+    texto_truncado = document_text  # Enviar texto completo
 
     prompt = f"""Eres un extractor especializado de escrituras públicas mexicanas.
 
@@ -106,6 +107,24 @@ O si no tiene representante:
   "representante": null
 }}
 
+⚠️ CAMPOS EXCLUSIVOS POR TIPO DE ENTIDAD:
+==========================================
+
+TITULAR (vendedor):
+- nombre
+- tipo
+- representante
+
+ADQUIRIENTE (comprador):
+- nombre
+- tipo
+- representante
+- estado_civil (casado/soltero/divorciado/viudo) - SI APARECE
+- rfc - SI APARECE
+- curp - SI APARECE
+- edad - SI APARECE
+- tipo_sociedad (separación de bienes/sociedad conyugal) - SI APARECE
+
 PLANTILLA DE RESPUESTA (JSON):
 ==============================
 
@@ -121,6 +140,11 @@ PLANTILLA DE RESPUESTA (JSON):
   "adquiriente": {{
     "nombre": "NOMBRE COMPLETO DEL COMPRADOR",
     "tipo": "empresa" o "persona",
+    "estado_civil": "..." o false,
+    "rfc": "..." o false,
+    "curp": "..." o false,
+    "edad": X o false,
+    "tipo_sociedad": "..." o false,
     "representante": null o {{
       "nombre": "NOMBRE DEL REPRESENTANTE",
       "en_calidad": "gestor de negocios"
@@ -148,6 +172,11 @@ JSON correcto:
   "adquiriente": {{
     "nombre": "ANGELBERTA PÉREZ SOTO",
     "tipo": "persona",
+    "estado_civil": "casada",
+    "rfc": false,
+    "curp": false,
+    "edad": false,
+    "tipo_sociedad": false,
     "representante": null
   }}
 }}
@@ -158,7 +187,9 @@ REGLAS IMPORTANTES:
 - Si es EMPRESA → representante es OBLIGATORIO (objeto)
 - Si es PERSONA sin apoderado → representante: null
 - Si el documento menciona MÚLTIPLES representantes → toma SOLO EL PRIMERO
-- Usa null si no encuentras un dato (NO uses "N/A" o "NO ENCONTRADO")
+- TITULAR: SOLO extrae nombre, tipo, representante (NO rfc, curp, edad, estado_civil, tipo_sociedad)
+- ADQUIRIENTE: Extrae rfc, curp, edad, estado_civil, tipo_sociedad SOLO SI APARECEN (sino usa false)
+- Usa null para representante, usa false para campos que no existan (NO uses "N/A" o "NO ENCONTRADO")
 
 DOCUMENTO A EXTRAER:
 ===================
@@ -191,7 +222,10 @@ def build_gemini_prompt_expandido(document_text: str) -> str:
         str: Prompt expandido para Gemini
     """
 
-    texto_truncado = document_text[:6000] if len(document_text) > 6000 else document_text
+    # FIX 2026-01-26: NO truncar el texto. Gemini 2.5 Flash soporta 1M tokens (~4M caracteres)
+    # Los RFC/CURP/edad están al FINAL del documento (sección FE NOTARIAL)
+    # Antes: texto_truncado = document_text[:6000]
+    texto_truncado = document_text  # Enviar texto completo
 
     prompt = f"""Eres un extractor especializado de escrituras públicas mexicanas.
 
@@ -205,16 +239,19 @@ Extrae los siguientes campos del documento:
 - TITULAR = VENDEDOR (vende/transmite/enajena)
 - ADQUIRIENTE = COMPRADOR (adquiere/compra)
 
-Para cada uno extrae:
-- Nombre completo
-- Tipo (empresa/persona)
-- Representante (si existe): UN SOLO objeto con nombre, en_calidad, escritura, fecha_poder
+⚠️ CAMPOS POR TIPO DE ENTIDAD:
+- TITULAR: nombre, tipo, representante
+- ADQUIRIENTE: nombre, tipo, representante, estado_civil, rfc, curp, edad, tipo_sociedad
 
 ⚠️ REGLA REPRESENTANTE:
 - Cada titular/adquiriente puede tener MÁXIMO UN representante
 - Si tipo = "empresa" → representante es OBLIGATORIO
 - Si tipo = "persona" → representante es OPCIONAL (puede ser null)
 - Si hay varios representantes mencionados → toma SOLO EL PRIMERO
+
+⚠️ CAMPOS EXCLUSIVOS DE ADQUIRIENTE:
+- estado_civil, rfc, curp, edad, tipo_sociedad → SOLO extraer para ADQUIRIENTE
+- Si NO aparecen en el documento → usa false (NO null)
 
 ═══════════════════════════════════════════════════════════════
 2. MUNICIPIO DEL INMUEBLE
@@ -271,6 +308,11 @@ PLANTILLA DE RESPUESTA (JSON):
   "adquiriente": {{
     "nombre": "NOMBRE COMPRADOR",
     "tipo": "empresa" o "persona",
+    "estado_civil": "..." o false,
+    "rfc": "..." o false,
+    "curp": "..." o false,
+    "edad": X o false,
+    "tipo_sociedad": "..." o false,
     "representante": null o {{
       "nombre": "NOMBRE REPRESENTANTE",
       "en_calidad": "cargo",
@@ -288,7 +330,9 @@ REGLAS IMPORTANTES:
 - Si es EMPRESA → representante es OBLIGATORIO (objeto)
 - Si es PERSONA sin apoderado → representante: null
 - Si hay MÚLTIPLES representantes mencionados → toma SOLO EL PRIMERO
-- Usa null si no encuentras un dato (NO uses "N/A" o "NO ENCONTRADO")
+- TITULAR: SOLO extrae nombre, tipo, representante (NO rfc, curp, edad, estado_civil, tipo_sociedad)
+- ADQUIRIENTE: Extrae rfc, curp, edad, estado_civil, tipo_sociedad SOLO SI APARECEN (sino usa false)
+- Usa null para representante/municipio/monto, usa false para campos de adquiriente que no existan
 - Municipio del INMUEBLE, NO de la notaría
 - Monto de VENTA, NO impuestos
 
@@ -320,7 +364,9 @@ def build_gemini_prompt_completo(document_text: str) -> str:
         str: Prompt completo para Gemini
     """
 
-    texto_truncado = document_text[:7000] if len(document_text) > 7000 else document_text
+    # FIX 2026-01-26: NO truncar el texto. Gemini 2.5 Flash soporta 1M tokens
+    # Antes: texto_truncado = document_text[:7000]
+    texto_truncado = document_text  # Enviar texto completo
 
     prompt = f"""Eres un extractor experto de escrituras públicas mexicanas.
 
@@ -334,13 +380,16 @@ Extrae TODOS los siguientes campos del documento:
    - Nombre completo
    - Tipo (empresa/persona)
    - Representante (si existe): nombre, en_calidad, escritura, fecha_poder
+   ⚠️ NO EXTRAER: rfc, curp, edad, estado_civil, tipo_sociedad
 
 2. ADQUIRIENTE (COMPRADOR):
    - Nombre completo
    - Tipo (empresa/persona)
-   - Estado civil (casado/soltero/divorciado/viudo)
-   - RFC (si aparece explícitamente)
-   - CURP (si aparece explícitamente)
+   - Estado civil (casado/soltero/divorciado/viudo) - SI APARECE
+   - RFC - SI APARECE
+   - CURP - SI APARECE
+   - Edad - SI APARECE
+   - Tipo de sociedad (separación de bienes/sociedad conyugal) - SI APARECE
    - Representante (si existe)
 
 3. UBICACIÓN:
@@ -356,9 +405,10 @@ Extrae TODOS los siguientes campos del documento:
 - ADQUIRIENTE = COMPRADOR (adquiere/compra)
 - EMPRESA → DEBE tener representante
 - PERSONA → representante solo si lo menciona el documento
+- TITULAR: SOLO nombre, tipo, representante (NO rfc, curp, edad, estado_civil, tipo_sociedad)
+- ADQUIRIENTE: Incluye rfc, curp, edad, estado_civil, tipo_sociedad → false si no aparecen
 - Municipio del INMUEBLE, NO de la notaría
 - Monto de VENTA, NO impuestos
-- RFC/CURP: extraer solo si aparece en el documento
 
 PLANTILLA JSON:
 ===============
@@ -377,9 +427,11 @@ PLANTILLA JSON:
   "adquiriente": {{
     "nombre": "...",
     "tipo": "empresa" o "persona",
-    "estado_civil": "..." o null,
-    "rfc": "..." o null,
-    "curp": "..." o null,
+    "estado_civil": "..." o false,
+    "rfc": "..." o false,
+    "curp": "..." o false,
+    "edad": X o false,
+    "tipo_sociedad": "..." o false,
     "representante": null o {{...}}
   }},
   "municipio": "..." o null,

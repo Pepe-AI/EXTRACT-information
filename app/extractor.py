@@ -315,13 +315,14 @@ class EscrituraExtractor:
         self.config = config or ExtractionConfig()
         self.ollama_service = get_ollama_service(ollama_config)
         self.ocr_service = get_ocr_service(azure_config)
-        
-        print(f"🔧 Extractor inicializado (Sistema Plan Z)")
-        print(f"   - Modelo: {self.ollama_service.config.model}")
-        print(f"   - Clasificación previa: {'✅' if self.config.use_classification else '❌'}")
-        print(f"   - Plan E (recuperación): {'✅' if self.config.use_plan_e else '❌'}")
-        print(f"   - Max reintentos: {self.config.max_retries}")
-        print(f"   - Temperature: {self.config.temperature}")
+
+        # FIX: Comentado temporalmente por encoding issues en Windows
+        # print(f"🔧 Extractor inicializado (Sistema Plan Z)")
+        # print(f"   - Modelo: {self.ollama_service.config.model}")
+        # print(f"   - Clasificación previa: {'✅' if self.config.use_classification else '❌'}")
+        # print(f"   - Plan E (recuperación): {'✅' if self.config.use_plan_e else '❌'}")
+        # print(f"   - Max reintentos: {self.config.max_retries}")
+        # print(f"   - Temperature: {self.config.temperature}")
     
     def extract(self, pdf_path: str) -> ExtractionResult:
         """
@@ -1264,10 +1265,30 @@ class EscrituraExtractor:
                             deepseek_adq["actua_por"] = "derecho propio"
                             print(f"   ✅ Adquiriente[{i}].representante ← Gemini (null)")
 
-                    # Gemini también puede traer estado_civil (versiones futuras)
+                    # Gemini también puede traer estado_civil
                     if gemini_adq.get("estado_civil"):
                         deepseek_adq["estado_civil"] = gemini_adq["estado_civil"]
                         print(f"   ✅ Adquiriente[{i}].estado_civil ← Gemini")
+
+                    # Gemini también puede traer tipo_sociedad
+                    if gemini_adq.get("tipo_sociedad"):
+                        deepseek_adq["tipo_sociedad"] = gemini_adq["tipo_sociedad"]
+                        print(f"   ✅ Adquiriente[{i}].tipo_sociedad ← Gemini")
+
+                    # Gemini también puede traer edad
+                    if gemini_adq.get("edad"):
+                        deepseek_adq["edad"] = gemini_adq["edad"]
+                        print(f"   ✅ Adquiriente[{i}].edad ← Gemini")
+
+                    # Gemini también puede traer rfc
+                    if gemini_adq.get("rfc"):
+                        deepseek_adq["rfc"] = gemini_adq["rfc"]
+                        print(f"   ✅ Adquiriente[{i}].rfc ← Gemini")
+
+                    # Gemini también puede traer curp
+                    if gemini_adq.get("curp"):
+                        deepseek_adq["curp"] = gemini_adq["curp"]
+                        print(f"   ✅ Adquiriente[{i}].curp ← Gemini")
 
             else:
                 # DeepSeek no tiene adquirientes, crear desde Gemini

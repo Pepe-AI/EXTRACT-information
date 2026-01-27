@@ -99,7 +99,6 @@ class EscrituraPublicaFlexible(BaseModel):
     adquirientes: Optional[List[AdquirienteFlexible]] = Field(default_factory=list)
     monto_operacion: Optional[str] = Field(default=NO_ENCONTRADO)
     valor_catastral: Optional[str] = Field(default=None)
-    curps: Optional[List[str]] = Field(default_factory=list)
 
     model_config = {"extra": "allow"}
 
@@ -177,8 +176,6 @@ class EscrituraPublicaFlexible(BaseModel):
             encontrados["monto_operacion"] = self.monto_operacion
         if self.valor_catastral:
             encontrados["valor_catastral"] = self.valor_catastral
-        if self.curps:
-            encontrados["curps"] = self.curps
 
         return encontrados
     
@@ -294,8 +291,7 @@ class EscrituraPublica(BaseModel):
     adquirientes: List[Adquiriente] = Field(..., min_length=1)
     monto_operacion: str = Field(..., description="Monto de la operación")
     valor_catastral: Optional[str] = Field(default=None)
-    curps: Optional[List[str]] = Field(default_factory=list)
-    
+
     @field_validator('numero_escritura')
     @classmethod
     def validar_numero(cls, v: int) -> int:
@@ -421,7 +417,7 @@ def get_campos_obligatorios() -> List[str]:
 
 def get_campos_no_obligatorios() -> List[str]:
     """Lista de campos no obligatorios."""
-    return ["valor_catastral", "curps"]
+    return ["valor_catastral"]
 
 
 def validar_json_flexible(json_data: Dict[str, Any]) -> EscrituraPublicaFlexible:
