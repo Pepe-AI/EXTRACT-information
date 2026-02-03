@@ -34,11 +34,10 @@ class TipoTitular(str, Enum):
 
 class RepresentanteFlexible(BaseModel):
     """Representante con todos los campos opcionales."""
-    
+
     nombre: Optional[str] = Field(default=NO_ENCONTRADO)
     en_calidad: Optional[str] = Field(default=NO_ENCONTRADO)
     escritura: Optional[Union[str, int]] = Field(default=NO_ENCONTRADO)
-    bis: Optional[bool] = Field(default=False)
     fecha_poder: Optional[str] = Field(default=NO_ENCONTRADO)
     
     model_config = {"extra": "allow"}
@@ -237,11 +236,10 @@ class EscrituraPublicaFlexible(BaseModel):
 
 class Representante(BaseModel):
     """Representante con campos obligatorios."""
-    
+
     nombre: str = Field(..., description="Nombre del representante")
     en_calidad: str = Field(..., description="En qué calidad actúa")
     escritura: Union[str, int] = Field(..., description="Número de escritura del poder")
-    bis: bool = Field(default=False, description="Si tiene bis")
     fecha_poder: str = Field(..., description="Fecha del poder")
     
     @field_validator('escritura', mode='before')
@@ -337,6 +335,23 @@ class EscrituraPublica(BaseModel):
             r'\bFUNDACI[OÓ]N\b',
             r'\bASAMBLEA\b',
             r'\bASOCIACI[OÓ]N\b',
+            # Instituciones gubernamentales y organismos específicos
+            r'\bINFONAVIT\b',
+            r'\bFOVISSSTE\b',
+            r'\bIMSS\b',
+            r'\bISST[EE]\b',
+            r'\bCFE\b',
+            r'\bPEMEX\b',
+            r'\bBANOBRAS\b',
+            r'\bFONHAPO\b',
+            r'\bINSUS\b',
+            r'\bINVIEND\b',
+            r'\bCONAVI\b',
+            r'\bFONADIN\b',
+            r'\bSEDATU\b',
+            r'\bSEDESO[L]\?\b',
+            r'\bORGANISMO\s+',
+            r'\bCONSORCIO\b',
         ]
 
         def detectar_tipo_por_nombre(nombre: str) -> Optional[str]:
@@ -365,6 +380,25 @@ class EscrituraPublica(BaseModel):
             if tipo == "empresa" and adq.representante is None:
                 print(f"⚠️ Advertencia: Adquiriente #{i+1} '{adq.nombre}' "
                       f"parece empresa pero no tiene representante")
+
+        # Validar que escritura del representante NO sea igual a numero_escritura
+        numero_escritura_str = str(self.numero_escritura)
+
+        for i, titular in enumerate(self.titulares):
+            if titular.representante and titular.representante.escritura:
+                escritura_rep = str(titular.representante.escritura)
+                if escritura_rep == numero_escritura_str:
+                    print(f"⚠️ Advertencia: Titular #{i+1} '{titular.nombre}' - "
+                          f"la escritura del representante ({escritura_rep}) es igual al numero_escritura principal ({numero_escritura_str}). "
+                          f"Esto probablemente es un error.")
+
+        for i, adq in enumerate(self.adquirientes):
+            if adq.representante and adq.representante.escritura:
+                escritura_rep = str(adq.representante.escritura)
+                if escritura_rep == numero_escritura_str:
+                    print(f"⚠️ Advertencia: Adquiriente #{i+1} '{adq.nombre}' - "
+                          f"la escritura del representante ({escritura_rep}) es igual al numero_escritura principal ({numero_escritura_str}). "
+                          f"Esto probablemente es un error.")
 
         return self
 

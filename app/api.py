@@ -332,7 +332,6 @@ async def get_schema():
                         "nombre": "string",
                         "en_calidad": "string",
                         "escritura": "string",
-                        "bis": "boolean",
                         "fecha_poder": "string"
                     } | null
                 }
@@ -351,7 +350,6 @@ async def get_schema():
                         "nombre": "string",
                         "en_calidad": "string",
                         "escritura": "string",
-                        "bis": "boolean",
                         "fecha_poder": "string"
                     } | null
                 }
