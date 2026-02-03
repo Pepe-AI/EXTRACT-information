@@ -55,7 +55,7 @@ class GeminiFallbackService:
 
         # Inicializar cliente con nueva API
         self.client = genai.Client(api_key=self.api_key)
-        self.model_name = 'gemini-2.5-flash'  # ← Cambiar aquí para otro modelo
+        self.model_name = 'gemini-2.0-flash-exp'  # ← Cambiar aquí para otro modelo
 
     def recuperar_campos_faltantes(
         self,
@@ -95,8 +95,8 @@ class GeminiFallbackService:
                 model=self.model_name,
                 contents=prompt,
                 config={
-                    "temperature": 0.0,  # Baja temperatura = más determinístico
-                    "max_output_tokens": 8000,  # Aumentado para múltiples adquirientes
+                    "temperature": 0.1,  # Baja temperatura = más determinístico
+                    "max_output_tokens": 2000,
                 }
             )
 
@@ -173,7 +173,6 @@ class GeminiFallbackService:
                             "nombre": "...",
                             "en_calidad": "...",
                             "escritura": "...",
-                            "bis": False,
                             "fecha_poder": "..."
                         } if campo == "adquirientes" else None
                     }
@@ -228,8 +227,8 @@ JSON:"""
                 model=self.model_name,
                 contents=prompt,
                 config={
-                    "temperature": 0.0,
-                    "max_output_tokens": 8000,  # Aumentado para múltiples adquirientes
+                    "temperature": 0.1,
+                    "max_output_tokens": 2000,
                 }
             )
             return response.text.strip()

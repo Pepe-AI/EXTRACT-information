@@ -75,7 +75,7 @@ HEADER_PATTERNS = [
 def clean_ocr_text(text: str) -> str:
     """
     Limpia texto extraído por OCR de documentos notariales.
-
+    
     PROCESO:
     ========
     1. Normalizar saltos de línea
@@ -83,16 +83,16 @@ def clean_ocr_text(text: str) -> str:
     3. Eliminar encabezados repetidos
     4. Unir palabras cortadas
     5. Normalizar espacios
-
+    
     Args:
         text: Texto crudo del OCR
-
+        
     Returns:
         Texto limpio y normalizado
     """
     if not text:
         return ""
-
+    
     # Normalizar saltos de línea
     text = text.replace('\r\n', '\n').replace('\r', '\n')
     
@@ -119,26 +119,26 @@ def clean_ocr_text(text: str) -> str:
             if re.search(pattern, stripped_line, re.IGNORECASE):
                 is_noise = True
                 break
-
+        
         if is_noise:
             continue
-
+        
         # Verificar si es encabezado repetido
         is_header = False
         for pattern in HEADER_PATTERNS:
             if re.search(pattern, stripped_line, re.IGNORECASE):
                 is_header = True
                 break
-
+        
         if is_header:
             if line_counts[stripped_line] > 1:
                 if stripped_line in seen_headers:
                     continue
                 else:
                     seen_headers.add(stripped_line)
-
+        
         cleaned_lines.append(stripped_line)
-
+    
     # Unir palabras cortadas
     processed_text = ""
     for line in cleaned_lines:
@@ -146,7 +146,7 @@ def clean_ocr_text(text: str) -> str:
             processed_text += line[:-1]
         else:
             processed_text += line + " "
-
+    
     # Normalizar espacios
     processed_text = re.sub(r'\s+', ' ', processed_text).strip()
     
@@ -454,15 +454,19 @@ def extraer_monto_operacion(texto: str) -> Optional[str]:
         # Ordenar por montos más "redondos" y posición en documento
         def score_monto(item):
             monto, _, pos = item
+            # Priorizar montos más grandes (típicamente son el precio de venta)
+            # Filtrar impuestos/pagos parciales que suelen ser más pequeños
+            tamaño_score = 0 if monto >= 500000 else (0.5 if monto >= 100000 else 1.0)
             pos_score = pos / 1000
             redondez = 0 if monto % 1000 == 0 else (0.5 if monto % 100 == 0 else 1)
-            return redondez + pos_score * 0.1
-        
+            # Dar más peso al tamaño del monto
+            return (tamaño_score * 2) + redondez + (pos_score * 0.1)
+
         mejores_montos.sort(key=score_monto)
         mejor_monto = mejores_montos[0][0]
-        
+
         return f"${mejor_monto:,.2f}"
-    
+
     return None
 
 
@@ -706,24 +710,58 @@ def extraer_fecha_documento(texto: str) -> Optional[str]:
         'dos mil veinte': '2020',
     }
     
+    # Mapeo de meses a números
+    MESES_NUM = {
+        'enero': '1', 'febrero': '2', 'marzo': '3', 'abril': '4',
+        'mayo': '5', 'junio': '6', 'julio': '7', 'agosto': '8',
+        'septiembre': '9', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+    }
+
+    # Palabras de días a números
+    DIAS_PALABRAS = {
+        'uno': '1', 'dos': '2', 'tres': '3', 'cuatro': '4', 'cinco': '5',
+        'seis': '6', 'siete': '7', 'ocho': '8', 'nueve': '9', 'diez': '10',
+        'once': '11', 'doce': '12', 'trece': '13', 'catorce': '14', 'quince': '15',
+        'dieciséis': '16', 'dieciseis': '16', 'diecisiete': '17', 'dieciocho': '18',
+        'diecinueve': '19', 'veinte': '20', 'veintiuno': '21', 'veintidós': '22',
+        'veintidos': '22', 'veintitrés': '23', 'veintitres': '23', 'veinticuatro': '24',
+        'veinticinco': '25', 'veintiséis': '26', 'veintiseis': '26', 'veintisiete': '27',
+        'veintiocho': '28', 'veintinueve': '29', 'treinta': '30', 'treinta y uno': '31'
+    }
+
     for patron in patrones:
         match = re.search(patron, texto, re.IGNORECASE)
         if match:
             grupos = match.groups()
             if len(grupos) == 3:
                 dia, mes, año = grupos
-                
+
                 # Convertir año en palabras a número si es necesario
                 año_lower = año.lower().strip()
                 if año_lower in ANIOS_PALABRAS:
                     año = ANIOS_PALABRAS[año_lower]
-                
-                # Si el día es en palabras, mantenerlo
-                if not dia.isdigit():
-                    dia = dia.capitalize()
-                
-                return f"{dia} de {mes.lower()} de {año}"
-    
+
+                # Convertir día en palabras a número si es necesario
+                dia_lower = dia.lower().strip()
+                if dia_lower in DIAS_PALABRAS:
+                    dia = DIAS_PALABRAS[dia_lower]
+                elif not dia.isdigit():
+                    # Si no está en el diccionario, intentar extraer solo dígitos
+                    dia_match = re.search(r'\d+', dia)
+                    if dia_match:
+                        dia = dia_match.group()
+
+                # Convertir mes a número
+                mes_lower = mes.lower().strip()
+                mes_num = MESES_NUM.get(mes_lower, mes_lower)
+
+                # Retornar en formato corto M/D/YYYY
+                try:
+                    return f"{mes_num}/{int(dia)}/{año}"
+                except (ValueError, TypeError):
+                    # Fallback a formato largo si hay error
+                    return f"{dia} de {mes.lower()} de {año}"
+
     return None
 
 
@@ -864,11 +902,12 @@ def extraer_nombre_notario(texto: str) -> Optional[str]:
             nombre = match.group(1).strip()
             nombre = re.sub(r'\s+', ' ', nombre)
             nombre = nombre.strip().rstrip(',.')
-            
+
             palabras = nombre.split()
             if len(palabras) >= 2 and len(nombre) >= 10:
-                return nombre
-    
+                # Normalizar a MAYÚSCULAS
+                return nombre.upper()
+
     return None
 
 
@@ -961,7 +1000,6 @@ def extraer_representante_adquiriente(
             "nombre": "MARIA GUADALUPE HILDA BERNAL CHAVARIN",
             "en_calidad": "GESTOR",
             "escritura": None,
-            "bis": False,
             "fecha_poder": None
         }
 
@@ -1006,7 +1044,6 @@ def extraer_representante_adquiriente(
             "nombre": limpiar_nombre_representante(nombre_rep),
             "en_calidad": en_calidad,
             "escritura": None,
-            "bis": False,
             "fecha_poder": None
         }
 
@@ -1022,7 +1059,6 @@ def extraer_representante_adquiriente(
             "nombre": limpiar_nombre_representante(nombre_rep),
             "en_calidad": cargo.upper(),
             "escritura": None,
-            "bis": False,
             "fecha_poder": None
         }
 
@@ -1244,37 +1280,61 @@ def extraer_curp_todos(texto: str) -> List[str]:
 
 def extraer_municipio(texto: str) -> Optional[str]:
     """
-    Extrae el municipio/ciudad donde se firma el documento.
-    
+    Extrae el municipio/ciudad del inmueble en la escritura.
+
+    PRIORIDAD:
+    ==========
+    1. Municipio donde está ubicado el inmueble (contexto "ubicado en", "situado en")
+    2. Municipio de la notaría/firma (contexto inicial del documento)
+
     PATRONES QUE BUSCA:
     ===================
-    - "En la ciudad de Guadalajara, Jalisco"
+    - "inmueble ubicado en el municipio de X"
+    - "predio situado en X"
+    - "En la ciudad de Guadalajara, Jalisco" (encabezado)
     - "En el municipio de Zapopan"
-    - "ciudad de México, Ciudad de México"
-    
+
     Args:
         texto: Texto del documento OCR
-        
+
     Returns:
         str: Nombre del municipio o None
     """
-    
-    patrones = [
-        r'[Ee]n\s+(?:la\s+)?ciudad\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:,|\s+[A-Z])',
-        r'[Ee]n\s+(?:el\s+)?municipio\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:,|\s+[A-Z])',
-        r'ciudad\s+de\s+([A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:,|\.|\s+[Ee]stado)',
+
+    # Prioridad 1: Municipio del inmueble (contexto de ubicación)
+    patrones_inmueble = [
+        r'(?:inmueble|predio|propiedad|bien inmueble)[\s\S]{0,100}?(?:ubicad[oa]|situad[oa]|que se encuentra)[\s\S]{0,50}?(?:en\s+)?(?:el\s+)?(?:municipio|ciudad)\s+de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:\s*,|\s+[Ee]stado|\s+[Nn]ayarit|\s+del\s+estado)',
+        r'(?:ubicad[oa]|situad[oa])[\s\S]{0,50}?(?:en\s+)?(?:el\s+)?municipio\s+de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:\s*,|\s+[Ee]stado)',
     ]
-    
-    for patron in patrones:
+
+    for patron in patrones_inmueble:
         match = re.search(patron, texto, re.IGNORECASE)
         if match:
             municipio = match.group(1).strip()
             municipio = re.sub(r'\s+', ' ', municipio)
             municipio = municipio.strip().rstrip(',.')
-            
+
             if 3 <= len(municipio) <= 50:
                 return municipio
-    
+
+    # Prioridad 2: Municipio del documento (encabezado - primeros 2000 chars)
+    encabezado = texto[:2000]
+    patrones_documento = [
+        r'[Ee]n\s+(?:la\s+)?ciudad\s+de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:\s*,|\s+[A-Z])',
+        r'[Ee]n\s+(?:el\s+)?municipio\s+de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:\s*,|\s+[A-Z])',
+        r'ciudad\s+de\s+([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?:\s*,|\.|,\s+[Ee]stado)',
+    ]
+
+    for patron in patrones_documento:
+        match = re.search(patron, encabezado, re.IGNORECASE)
+        if match:
+            municipio = match.group(1).strip()
+            municipio = re.sub(r'\s+', ' ', municipio)
+            municipio = municipio.strip().rstrip(',.')
+
+            if 3 <= len(municipio) <= 50:
+                return municipio
+
     return None
 
 
@@ -1428,6 +1488,7 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
             "fecha_documento": str | None,
             "monto_operacion": str | None,
             "municipio": str | None,
+            "curps": List[str],
         }
     """
 
@@ -1444,9 +1505,12 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
         # Campos de ubicación
         "municipio": extraer_municipio(texto),
 
-        # Campos de poder/instrumento (FASE 1 - Nuevos campos críticos)
+        # Listas de identificadores
+        "curps": extraer_curp_todos(texto),
+
+        # Campos de poder/instrumento (SOLO para uso interno - NO en raíz del JSON final)
         "numero_instrumento_poder": extraer_numero_instrumento_poder(texto),
-        "fecha_poder": extraer_fecha_poder(texto),
+        "fecha_poder": extraer_fecha_poder(texto),  # Se asigna a representante.fecha_poder en extractor.py
 
         # NOTA: estado_civil y representante_adquiriente requieren contexto
         # Se extraerán en post-procesamiento con datos de adquirientes
@@ -1512,6 +1576,142 @@ def validar_dato_en_texto(dato: Any, texto: str) -> bool:
         return False
     
     return False
+
+
+def extraer_escritura_poder(texto: str, nombre_representante: str = None) -> Optional[str]:
+    """
+    Extrae el número de escritura del poder notarial del representante.
+
+    REGLA CRÍTICA: Este número NO puede ser igual al numero_escritura principal del documento.
+
+    Patrones comunes:
+    - "instrumento número 63,550"
+    - "escritura número 21695"
+    - "poder otorgado mediante escritura 12345"
+    - "escritura pública número 5678"
+
+    Args:
+        texto: Texto OCR del documento
+        nombre_representante: Nombre del representante (opcional, para contexto)
+
+    Returns:
+        str: Número de escritura del poder o None
+
+    Ejemplo:
+        >>> texto = "instrumento número 63,550 sesenta y tres mil quinientos cincuenta"
+        >>> extraer_escritura_poder(texto)
+        '63550'
+    """
+
+    # Patrones para extraer número de escritura del poder
+    # IMPORTANTE: Poner \d{4,7} primero para capturar números sin comas primero
+    patrones = [
+        # "instrumento número 63,550" o "instrumento No. 63,550"
+        r'instrumento\s+(?:n[uú]mero|no?\.?|#)\s*(\d{4,7}|[0-9]{1,3}(?:,\d{3})+)',
+
+        # "poder otorgado mediante escritura número 21695"
+        r'poder\s+otorgado\s+mediante\s+escritura\s+(?:n[uú]mero|no?\.?|#)?\s*(\d{4,7}|[0-9]{1,3}(?:,\d{3})+)',
+
+        # "mediante escritura 12345"
+        r'mediante\s+escritura\s+(?:n[uú]mero|no?\.?|#)?\s*(\d{4,7}|[0-9]{1,3}(?:,\d{3})+)',
+
+        # "escritura pública número 5678 de fecha"
+        r'escritura\s+p[uú]blica\s+(?:n[uú]mero|no?\.?|#)\s*(\d{4,7}|[0-9]{1,3}(?:,\d{3})+)\s+de\s+fecha',
+
+        # "escritura 21695 del" (sin "número")
+        r'escritura\s+(\d{4,7})\s+del',
+    ]
+
+    for patron in patrones:
+        matches = re.finditer(patron, texto, re.IGNORECASE | re.MULTILINE)
+        for match in matches:
+            numero = match.group(1).replace(',', '').strip()
+            if numero and len(numero) >= 3:  # Mínimo 3 dígitos
+                return numero
+
+    return None
+
+
+def extraer_fecha_poder(texto: str, nombre_representante: str = None) -> Optional[str]:
+    """
+    Extrae la fecha del poder notarial del representante.
+
+    Patrones comunes:
+    - "de fecha 15 de abril del año 2020"
+    - "de fecha 15/04/2020"
+    - "otorgado el 10 de marzo de 2023"
+    - "instrumento ... de fecha quince de abril del dos mil veinte"
+
+    Args:
+        texto: Texto OCR del documento
+        nombre_representante: Nombre del representante (opcional, para contexto)
+
+    Returns:
+        str: Fecha del poder o None
+
+    Ejemplo:
+        >>> texto = "instrumento 63,550 de fecha 15 de abril del año 2020"
+        >>> extraer_fecha_poder(texto)
+        '15/04/2020'
+    """
+
+    # Patrones para extraer fecha del poder
+    patrones = [
+        # "de fecha 15 de abril del año 2020"
+        r'de\s+fecha\s+(\d{1,2})\s+de\s+(\w+)\s+del?\s+(?:año\s+)?(\d{4})',
+
+        # "de fecha 15/04/2020"
+        r'de\s+fecha\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
+
+        # "del 10 de marzo de 2023" (después de número de escritura)
+        r'del\s+(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})',
+
+        # "otorgado el 10 de marzo de 2023"
+        r'otorgado\s+el\s+(\d{1,2})\s+de\s+(\w+)\s+del?\s+(\d{4})',
+
+        # "instrumento ... de fecha quince de abril del dos mil veinte"
+        r'de\s+fecha\s+(\w+)\s+de\s+(\w+)\s+del?\s+(?:año\s+)?(\w+(?:\s+\w+)*)',
+    ]
+
+    meses_map = {
+        'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
+        'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
+        'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+    }
+
+    for i, patron in enumerate(patrones):
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            if i == 0:  # "de fecha 15 de abril del año 2020"
+                dia = match.group(1)
+                mes_texto = match.group(2).lower()
+                anio = match.group(3)
+                mes = meses_map.get(mes_texto, '??')
+                return f"{dia}/{mes}/{anio}"
+
+            elif i == 1:  # "de fecha 15/04/2020"
+                fecha = match.group(1)
+                # Normalizar separadores a /
+                return fecha.replace('-', '/')
+
+            elif i == 2:  # "del 10 de marzo de 2023"
+                dia = match.group(1)
+                mes_texto = match.group(2).lower()
+                anio = match.group(3)
+                mes = meses_map.get(mes_texto, '??')
+                return f"{dia}/{mes}/{anio}"
+
+            elif i == 3:  # "otorgado el 10 de marzo de 2023"
+                dia = match.group(1)
+                mes_texto = match.group(2).lower()
+                anio = match.group(3)
+                mes = meses_map.get(mes_texto, '??')
+                return f"{dia}/{mes}/{anio}"
+
+            elif i == 4:  # Fecha en texto (más complejo, retornar tal cual)
+                return match.group(0)
+
+    return None
 
 
 # =============================================================================

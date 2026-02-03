@@ -366,7 +366,6 @@ python -m tests.test_05_azure_ocr_service
         "nombre": "Juan Carlos Pérez López",
         "en_calidad": "apoderado legal",
         "escritura": "1234",
-        "bis": false,
         "fecha_poder": "10 de enero de 2020"
       }
     }

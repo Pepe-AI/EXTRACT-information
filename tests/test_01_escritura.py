@@ -57,7 +57,6 @@ def test_modelo_estricto_completo():
                     nombre="Juan Pérez",
                     en_calidad="apoderado legal",
                     escritura="1234",
-                    bis=False,
                     fecha_poder="10/01/2020"
                 )
             )
@@ -231,11 +230,9 @@ def test_representante_flexible():
     print(f"\n✅ Representante creado:")
     print(f"   Nombre: {rep.nombre}")
     print(f"   En calidad: {rep.en_calidad}")
-    print(f"   Bis: {rep.bis}")
-    
+
     assert rep.nombre == "Juan Pérez"
     assert rep.en_calidad == NO_ENCONTRADO
-    assert rep.bis == False
 
 
 def test_campos_obligatorios():
@@ -361,7 +358,6 @@ def test_adquiriente_empresa_con_representante():
                     nombre="María López García",
                     en_calidad="apoderado legal",
                     escritura="5678",
-                    bis=False,
                     fecha_poder="10 de marzo de 2023"
                 )
             )

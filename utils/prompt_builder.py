@@ -33,7 +33,7 @@ NO_ENCONTRADO = None  # Valor por defecto cuando no se encuentra un dato
 CAMPOS_RAIZ_PERMITIDOS = {
     "numero_escritura", "fecha_documento", "numero_notaria",
     "municipio", "nombre_notario", "tipo_titular",
-    "titulares", "adquirientes", "monto_operacion", "valor_catastral"
+    "titulares", "adquirientes", "monto_operacion", "valor_catastral", "curps"
 }
 
 CAMPOS_TITULAR_PERMITIDOS = {
@@ -41,7 +41,7 @@ CAMPOS_TITULAR_PERMITIDOS = {
 }
 
 CAMPOS_REPRESENTANTE_PERMITIDOS = {
-    "nombre", "en_calidad", "escritura", "bis", "fecha_poder"
+    "nombre", "en_calidad", "escritura", "fecha_poder"
 }
 
 CAMPOS_ADQUIRIENTE_PERMITIDOS = {
@@ -298,7 +298,7 @@ def _normalizar_valores_null(json_data: dict) -> dict:
     ==============
     1. Recorre recursivamente el JSON (porque hay estructuras anidadas)
     2. Para campos string obligatorios: null → "NO SE ENCONTRÓ DATO"
-    3. Para campos boolean (rfc, curp, bis): null → False
+    3. Para campos boolean (rfc, curp): null → False
     
     Args:
         json_data: JSON con posibles valores null
@@ -324,7 +324,7 @@ def _normalizar_valores_null(json_data: dict) -> dict:
     }
     
     # Campos que deben ser boolean (null → False)
-    CAMPOS_BOOLEAN = {"rfc", "curp", "bis"}
+    CAMPOS_BOOLEAN = {"rfc", "curp"}
     
     def normalizar_recursivo(obj, campo_padre=None):
         """Normaliza valores null de forma recursiva."""
@@ -377,7 +377,6 @@ EJEMPLO_JSON_EMPRESA = {
                 "nombre": "Ernesto Padilla Aceves",
                 "en_calidad": "Representante Regional",
                 "escritura": None,
-                "bis": False,
                 "fecha_poder": "5 de mayo de 2023"
             }
         }
@@ -396,7 +395,8 @@ EJEMPLO_JSON_EMPRESA = {
         }
     ],
     "monto_operacion": "$8,654.00",
-    "valor_catastral": None
+    "valor_catastral": None,
+    "curps": []
 }
 
 EJEMPLO_JSON_EMPRESA_2 = {
@@ -415,7 +415,6 @@ EJEMPLO_JSON_EMPRESA_2 = {
                 "nombre": "ROSA HERLINDA DURAN GEBBIA",
                 "en_calidad": "apoderado",
                 "escritura": "21695",
-                "bis": False,
                 "fecha_poder": "14 de octubre de 2021"
             }
         }
@@ -434,7 +433,8 @@ EJEMPLO_JSON_EMPRESA_2 = {
         }
     ],
     "monto_operacion": "$3,100,000.00",
-    "valor_catastral": None
+    "valor_catastral": None,
+    "curps": []
 }
 
 EJEMPLO_JSON_PERSONA = {
@@ -466,7 +466,8 @@ EJEMPLO_JSON_PERSONA = {
         }
     ],
     "monto_operacion": "$1,200,000.00",
-    "valor_catastral": "$950,000.00"
+    "valor_catastral": "$950,000.00",
+    "curps": []
 }
 
 
@@ -487,8 +488,7 @@ REGLAS ABSOLUTAS QUE DEBES SEGUIR:
 CAMPOS PROHIBIDOS (NUNCA LOS USES):
 - representante_legal (el representante va DENTRO del objeto "representante")
 - notario (como array u objeto)
-- rfcs (como array en raíz - el rfc va DENTRO de cada adquiriente)
-- curps (como array en raíz - el curp va DENTRO de cada adquiriente)
+- rfcs (como array)
 - gestora_negocios
 - documento
 - inmueble
@@ -542,6 +542,19 @@ def _build_prompt_generico(
 ║                    EXTRACCIÓN DE ESCRITURA                       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
+⚠️ ATENCIÓN - ERRORES CRÍTICOS A EVITAR:
+========================================
+
+NUNCA CONFUNDAS TITULAR CON ADQUIRIENTE:
+- TITULAR = VENDEDOR (quien transmite, enajena, vende el inmueble)
+- ADQUIRIENTE = COMPRADOR (quien adquiere, compra el inmueble)
+
+Busca en el documento frases como:
+- "comparece NOMBRE y expone que es propietario..." → TITULAR (vendedor)
+- "por la otra parte comparece NOMBRE quien manifiesta su interés en adquirir..." → ADQUIRIENTE (comprador)
+- "vende" / "transmite" / "enajena" → TITULAR
+- "adquiere" / "compra" → ADQUIRIENTE
+
 INSTRUCCIONES IMPORTANTES:
 =========================
 
@@ -558,7 +571,7 @@ INSTRUCCIONES IMPORTANTES:
      * DEBE tener representante (persona física que firma)
    - Si es PERSONA FÍSICA (actúa por sí misma):
      * tipo: "persona"
-     * representante es OPCIONAL (solo si tiene apoderado)
+     * representante: null (NO agregar representante a menos que el documento mencione explícitamente un apoderado/gestor)
 
 3. VALORES POR DEFECTO:
    - Si NO encuentras un dato, usa null
@@ -574,40 +587,62 @@ PLANTILLA JSON (campos obligatorios):
     "municipio": "CIUDAD, ESTADO",
     "nombre_notario": null,  // Extraer del encabezado (ej: "RIGOBERTO OCHOA TORRES")
     "tipo_titular": null,  // DEPRECATED: ignorar
+
+    // ⚠️ TITULARES = VENDEDORES (quienes transmiten/venden)
     "titulares": [
         {
-            "nombre": "NOMBRE",
+            "nombre": "NOMBRE DEL VENDEDOR",  // Busca "vende", "transmite", "enajena"
             "tipo": "empresa" o "persona",
             "actua_por": "representación" o "derecho propio",
-            "representante": null o {nombre, en_calidad, escritura, bis, fecha_poder}
+            "representante": null o {nombre, en_calidad, escritura, fecha_poder}
         }
     ],
+
+    // ⚠️ ADQUIRIENTES = COMPRADORES (quienes adquieren/compran)
     "adquirientes": [
         {
-            "nombre": "NOMBRE",
+            "nombre": "NOMBRE DEL COMPRADOR",  // Busca "adquiere", "compra"
             "tipo": "empresa" o "persona",
             "actua_por": "derecho propio" o "representación",
-            "estado_civil": false,  // false si no existe
-            "tipo_sociedad": false,  // false si no existe
-            "edad": false,           // false si no existe
-            "rfc": false,            // false si no existe
-            "curp": false,           // false si no existe
+            "estado_civil": "estado",
+            "tipo_sociedad": null,
+            "edad": null,
+            "rfc": false,
+            "curp": false,
             "representante": null o {objeto}
         }
     ],
     "monto_operacion": "$X,XXX.XX",
-    "valor_catastral": null
+    "valor_catastral": null,
+    "curps": []
 }
 
-REGLAS IMPORTANTES:
-===================
-1. TITULARES: Solo necesitan nombre, tipo, actua_por, representante
-2. ADQUIRIENTES: Además de lo anterior, incluyen estado_civil, tipo_sociedad, edad, rfc, curp
-3. Si titular/adquiriente es EMPRESA → representante es OBLIGATORIO
-4. Si titular/adquiriente es PERSONA → representante es OPCIONAL
-5. Para campos estado_civil, tipo_sociedad, edad, rfc, curp en adquirientes:
-   - Si NO existen en el documento → usa "false"
-   - Si SÍ existen → extrae el valor
+REGLAS CRÍTICAS:
+- Si titular/adquiriente es EMPRESA → representante es OBLIGATORIO (persona física que firma)
+- Si titular/adquiriente es PERSONA → representante: null (NO crear representante a menos que el documento lo mencione explícitamente)
+
+IMPORTANTE: NO inventes representantes. Si es una persona actuando por derecho propio, el campo "representante" DEBE ser null
+
+EJEMPLO DE IDENTIFICACIÓN CORRECTA:
+===================================
+
+Documento dice: "Comparece el INSTITUTO NACIONAL DEL SUELO SUSTENTABLE (INSUS),
+representado por ERNESTO PADILLA ACEVES, quien manifiesta que VENDE a la señora
+ANGELBERTA PÉREZ SOTO, quien ADQUIERE..."
+
+JSON correcto:
+{
+  "titulares": [{
+    "nombre": "INSTITUTO NACIONAL DEL SUELO SUSTENTABLE (INSUS)",  // ← VENDEDOR
+    "tipo": "empresa",
+    "representante": {"nombre": "ERNESTO PADILLA ACEVES", ...}
+  }],
+  "adquirientes": [{
+    "nombre": "ANGELBERTA PÉREZ SOTO",  // ← COMPRADOR
+    "tipo": "persona",
+    "representante": null
+  }]
+}
 
 """
 
@@ -698,7 +733,6 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
                 "nombre": "...",
                 "en_calidad": "...",
                 "escritura": "...",
-                "bis": false,
                 "fecha_poder": "..."
             }}
         }}
@@ -716,7 +750,8 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
         }}
     ],
     "monto_operacion": "...",
-    "valor_catastral": null
+    "valor_catastral": null,
+    "curps": []
 }}
 
 """
@@ -839,7 +874,7 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
     # PASO 0b: Normalizar valores null a valores válidos
     # =========================================================================
     # Convierte null → "NO SE ENCONTRÓ DATO" para campos string
-    # Convierte null → False para campos boolean (rfc, curp, bis)
+    # Convierte null → False para campos boolean (rfc, curp)
     json_data = _normalizar_valores_null(json_data)
     
     resultado = {}
@@ -883,7 +918,6 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
                             "nombre": rep_legal if isinstance(rep_legal, str) else str(rep_legal),
                             "en_calidad": titular.get("en_calidad", NO_ENCONTRADO),
                             "escritura": titular.get("escritura", NO_ENCONTRADO),
-                            "bis": titular.get("bis", False),
                             "fecha_poder": titular.get("fecha_poder", NO_ENCONTRADO)
                         }
                 
@@ -896,10 +930,7 @@ def limpiar_json_extra(json_data: Dict) -> Dict:
                             rep_limpio[campo] = rep[campo]
                         else:
                             # Valores por defecto
-                            if campo == "bis":
-                                rep_limpio[campo] = False
-                            else:
-                                rep_limpio[campo] = NO_ENCONTRADO
+                            rep_limpio[campo] = NO_ENCONTRADO
                     titular_limpio["representante"] = rep_limpio
                 
                 # Asegurar campos mínimos
