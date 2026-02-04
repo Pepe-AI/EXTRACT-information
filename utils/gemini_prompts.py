@@ -504,10 +504,29 @@ def parse_gemini_response(response_text: str) -> Dict[str, Any]:
     match = json_pattern.search(response_text)
 
     if match:
+        json_str = match.group()
         try:
-            return json.loads(match.group())
+            return json.loads(json_str)
         except json.JSONDecodeError as e:
             print(f"⚠️ Error parseando JSON extraído: {e}")
+
+            # Intentar reparar JSON incompleto
+            try:
+                # Si no termina con } o ], intentar cerrar
+                if not json_str.endswith('}') and not json_str.endswith(']'):
+                    open_braces = json_str.count('{') - json_str.count('}')
+                    open_brackets = json_str.count('[') - json_str.count(']')
+
+                    json_reparado = json_str
+                    for _ in range(open_brackets):
+                        json_reparado += ']'
+                    for _ in range(open_braces):
+                        json_reparado += '}'
+
+                    print(f"   🔧 Intentando reparar JSON...")
+                    return json.loads(json_reparado)
+            except:
+                pass
 
     print(f"⚠️ No se pudo extraer JSON de la respuesta de Gemini")
     return {}

@@ -55,7 +55,7 @@ class GeminiFallbackService:
 
         # Inicializar cliente con nueva API
         self.client = genai.Client(api_key=self.api_key)
-        self.model_name = 'gemini-2.0-flash-exp'  # ← Cambiar aquí para otro modelo
+        self.model_name = 'gemini-3-flash-preview'  # ← Cambiar aquí para otro modelo
 
     def recuperar_campos_faltantes(
         self,
@@ -96,16 +96,30 @@ class GeminiFallbackService:
                 contents=prompt,
                 config={
                     "temperature": 0.1,  # Baja temperatura = más determinístico
-                    "max_output_tokens": 2000,
+                    "max_output_tokens": 4000,  # Incrementado para JSON complejos
                 }
             )
 
             # Parsear respuesta JSON
             json_str = response.text.strip()
 
-            # Limpiar markdown si existe
-            if json_str.startswith('```'):
-                json_str = re.sub(r'```(?:json)?\n?', '', json_str).strip()
+            # Limpiar markdown si existe (tanto al inicio como al final)
+            if '```' in json_str:
+                # Remover bloques markdown completos
+                json_str = re.sub(r'```(?:json)?\s*', '', json_str)
+                json_str = json_str.strip()
+
+            # Si el JSON está incompleto, intentar repararlo
+            if not json_str.endswith('}') and not json_str.endswith(']'):
+                print(f"⚠️ JSON parece incompleto, intentando reparar...")
+                # Agregar cierre de objetos/arrays faltantes
+                open_braces = json_str.count('{') - json_str.count('}')
+                open_brackets = json_str.count('[') - json_str.count(']')
+
+                for _ in range(open_brackets):
+                    json_str += ']'
+                for _ in range(open_braces):
+                    json_str += '}'
 
             # Parsear JSON
             campos_recuperados = json.loads(json_str)
@@ -128,6 +142,47 @@ class GeminiFallbackService:
 
         except json.JSONDecodeError as e:
             print(f"⚠️ Error parseando JSON de Gemini: {e}")
+
+            # Intentar extraer al menos lo que se pueda del JSON parcial
+            # Buscar el último objeto/campo válido antes del error
+            try:
+                # Truncar en el punto del error y cerrar el JSON
+                error_pos = e.pos if hasattr(e, 'pos') else len(json_str)
+                json_parcial = json_str[:error_pos]
+
+                # Encontrar el último objeto completo
+                ultimo_cierre = max(
+                    json_parcial.rfind('}'),
+                    json_parcial.rfind(']'),
+                    0
+                )
+
+                if ultimo_cierre > 0:
+                    json_truncado = json_parcial[:ultimo_cierre + 1]
+                    # Cerrar estructuras abiertas
+                    open_braces = json_truncado.count('{') - json_truncado.count('}')
+                    open_brackets = json_truncado.count('[') - json_truncado.count(']')
+
+                    for _ in range(open_brackets):
+                        json_truncado += ']'
+                    for _ in range(open_braces):
+                        json_truncado += '}'
+
+                    print(f"   🔧 Intentando parsear JSON parcial...")
+                    campos_recuperados = json.loads(json_truncado)
+
+                    # Filtrar campos válidos
+                    resultado = {}
+                    for campo in campos_baja_confianza:
+                        if campo in campos_recuperados and campos_recuperados[campo]:
+                            resultado[campo] = campos_recuperados[campo]
+
+                    if resultado:
+                        print(f"   ✅ Recuperados {len(resultado)} campos del JSON parcial")
+                        return resultado
+            except:
+                pass
+
             print(f"   Respuesta: {response.text[:200]}...")
             return {}
         except Exception as e:
