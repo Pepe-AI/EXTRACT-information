@@ -96,13 +96,57 @@ def _recuperar_datos_estructura_alternativa(json_data: dict) -> dict:
     # Si ya tiene la estructura correcta, retornar sin cambios
     if "titulares" in json_data and json_data["titulares"]:
         return json_data
-    
+
     resultado = dict(json_data)  # Copia para no modificar original
-    
+
+    # =========================================================================
+    # ESTRATEGIA 0: Buscar "partes" directamente en raíz
+    # =========================================================================
+    # Maneja casos donde el LLM genera: {"partes": {"vendedor": "...", "comprador": "..."}}
+    partes_raiz = json_data.get("partes") or json_data.get("Partes")
+
+    if partes_raiz and isinstance(partes_raiz, dict) and not resultado.get("titulares"):
+        print("   🔄 Recuperando datos de estructura 'partes' en raíz...")
+
+        # Vendedor → titulares
+        vendedor = partes_raiz.get("vendedor") or partes_raiz.get("Vendedor")
+        if vendedor:
+            resultado["titulares"] = [{
+                "nombre": vendedor if isinstance(vendedor, str) else str(vendedor),
+                "actua_por": NO_ENCONTRADO,
+                "representante": None
+            }]
+            print(f"      ✅ Recuperado vendedor: {resultado['titulares'][0]['nombre'][:50]}...")
+
+        # Comprador → adquirientes
+        comprador = partes_raiz.get("comprador") or partes_raiz.get("Comprador")
+        if comprador:
+            resultado["adquirientes"] = [{
+                "nombre": comprador if isinstance(comprador, str) else str(comprador),
+                "estado_civil": NO_ENCONTRADO,
+                "actua_por": NO_ENCONTRADO,
+                "tipo_sociedad": None,
+                "edad": None,
+                "rfc": False,
+                "curp": False
+            }]
+            print(f"      ✅ Recuperado comprador: {resultado['adquirientes'][0]['nombre'][:50]}...")
+
+        # Recuperar otros campos de la raíz cuando hay "partes"
+        if not resultado.get("fecha_documento"):
+            fecha = json_data.get("fecha") or json_data.get("Fecha")
+            if fecha:
+                resultado["fecha_documento"] = fecha
+
+        if not resultado.get("monto_operacion"):
+            monto = json_data.get("precioVenta") or json_data.get("precio") or json_data.get("monto")
+            if monto:
+                resultado["monto_operacion"] = monto if isinstance(monto, str) else f"${monto:,.2f}"
+
     # =========================================================================
     # ESTRATEGIA 1: Buscar estructura "Documento"
     # =========================================================================
-    
+
     documento = json_data.get("Documento") or json_data.get("documento")
     
     if documento and isinstance(documento, dict):

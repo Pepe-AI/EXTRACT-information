@@ -148,7 +148,41 @@ class EscrituraPublicaFlexible(BaseModel):
                 return None
             return f"${v:,.2f}"
         return v
-    
+
+    @model_validator(mode='after')
+    def validar_escritura_representantes(self):
+        """
+        Valida que la escritura del representante NO sea igual al numero_escritura principal.
+        """
+        if not self.numero_escritura:
+            return self
+
+        numero_escritura_str = str(self.numero_escritura)
+
+        # Validar titulares
+        for i, titular in enumerate(self.titulares):
+            if titular.representante and titular.representante.escritura:
+                escritura_rep = str(titular.representante.escritura)
+                if escritura_rep == numero_escritura_str:
+                    print(f"⚠️ VALIDACIÓN: Titular #{i+1} '{titular.nombre}' - "
+                          f"la escritura del representante ({escritura_rep}) es IGUAL al numero_escritura "
+                          f"principal ({numero_escritura_str}). Esto es probablemente un error del LLM.")
+                    # Limpiar el campo para que sea recuperado correctamente
+                    titular.representante.escritura = NO_ENCONTRADO
+
+        # Validar adquirientes
+        for i, adq in enumerate(self.adquirientes):
+            if adq.representante and adq.representante.escritura:
+                escritura_rep = str(adq.representante.escritura)
+                if escritura_rep == numero_escritura_str:
+                    print(f"⚠️ VALIDACIÓN: Adquiriente #{i+1} '{adq.nombre}' - "
+                          f"la escritura del representante ({escritura_rep}) es IGUAL al numero_escritura "
+                          f"principal ({numero_escritura_str}). Esto es probablemente un error del LLM.")
+                    # Limpiar el campo para que sea recuperado correctamente
+                    adq.representante.escritura = NO_ENCONTRADO
+
+        return self
+
     def get_campos_encontrados(self) -> Dict[str, Any]:
         """
         Devuelve solo los campos que SÍ se encontraron.
