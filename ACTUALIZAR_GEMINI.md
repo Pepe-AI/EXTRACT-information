@@ -79,29 +79,30 @@ uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
 **Archivo:** `services/gemini_service.py:58`
 
 ```python
-self.model_name = 'gemini-2.0-flash-exp'  # ← Cambiar aquí
+self.model_name = 'gemini-3-flash-preview'  # ← Cambiar aquí
 ```
 
 ### Modelos disponibles:
 
 ```python
 # Rápidos y económicos
-'gemini-2.0-flash-exp'    # ← Actual (experimental)
+'gemini-3-flash-preview'  # ← Actual (más reciente)
+'gemini-2.0-flash-exp'    # Versión experimental anterior
 'gemini-2.0-flash'        # Versión estable
-'gemini-2.5-flash'        # Más reciente
+'gemini-2.5-flash'        # Versión intermedia
 
 # Mayor capacidad
 'gemini-pro'              # Modelo anterior
 'gemini-1.5-pro'          # Mayor contexto (1M tokens)
 ```
 
-**Recomendación:** Usa `gemini-2.5-flash` para mejor precisión/costo.
+**Recomendación:** Usa `gemini-3-flash-preview` para la versión más reciente.
 
 ### Ejemplo de cambio:
 
 ```python
 # En services/gemini_service.py línea 58
-self.model_name = 'gemini-2.5-flash'  # ← Cambiar a versión más reciente
+self.model_name = 'gemini-3-flash-preview'  # ← Versión actual
 ```
 
 ---
@@ -110,11 +111,11 @@ self.model_name = 'gemini-2.5-flash'  # ← Cambiar a versión más reciente
 
 | Modelo | Velocidad | Costo | Precisión | Contexto |
 |--------|-----------|-------|-----------|----------|
-| `gemini-2.0-flash-exp` | ⚡⚡⚡ | 💰 | ⭐⭐⭐ | 1M tokens |
+| `gemini-3-flash-preview` | ⚡⚡⚡ | 💰 | ⭐⭐⭐⭐ | 1M tokens |
 | `gemini-2.5-flash` | ⚡⚡ | 💰💰 | ⭐⭐⭐⭐ | 1M tokens |
 | `gemini-1.5-pro` | ⚡ | 💰💰💰 | ⭐⭐⭐⭐⭐ | 2M tokens |
 
-**Para escrituras públicas:** `gemini-2.5-flash` es el mejor balance.
+**Para escrituras públicas:** `gemini-3-flash-preview` es la versión más reciente.
 
 ---
 
@@ -152,7 +153,7 @@ pip show google-genai
 ### Error: "Invalid model name"
 ```bash
 # Verifica que el modelo existe
-# Modelos válidos: gemini-2.0-flash-exp, gemini-2.5-flash, gemini-1.5-pro
+# Modelos válidos: gemini-3-flash-preview, gemini-2.5-flash, gemini-1.5-pro
 ```
 
 ---

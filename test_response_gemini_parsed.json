@@ -1,0 +1,24 @@
+{
+  "titular": {
+    "nombre": "DESARROLLO TURISTICO LOS COCOS, SOCIEDAD ANÓNIMA DE CAPITAL VARIABLE",
+    "tipo": "empresa",
+    "representante": {
+      "nombre": "HECTOR RAMÓN FLORES IBARRA",
+      "en_calidad": "Apoderado General",
+      "escritura": "5058",
+      "fecha_poder": "21/11/1990"
+    }
+  },
+  "adquiriente": {
+    "nombre": "ANTONIO QUINTERO FLORES y SILVIA SÁNCHEZ SÁNCHEZ",
+    "tipo": "persona",
+    "estado_civil": "casado bajo el régimen de sociedad legal",
+    "rfc": "QUFA670718TK2",
+    "curp": "QUFA670718HJCNLN04",
+    "edad": 56,
+    "tipo_sociedad": false,
+    "representante": null
+  },
+  "municipio": "Compostela",
+  "monto_operacion": "$600,000.00"
+}

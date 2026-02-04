@@ -96,7 +96,7 @@ class GeminiFallbackService:
                 contents=prompt,
                 config={
                     "temperature": 0.1,  # Baja temperatura = más determinístico
-                    "max_output_tokens": 4000,  # Incrementado para JSON complejos
+                    "max_output_tokens": 8000,  # Incrementado para JSON complejos
                 }
             )
 

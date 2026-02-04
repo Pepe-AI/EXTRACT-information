@@ -1488,7 +1488,6 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
             "fecha_documento": str | None,
             "monto_operacion": str | None,
             "municipio": str | None,
-            "curps": List[str],
         }
     """
 
@@ -1504,9 +1503,6 @@ def extraer_todos_regex(texto: str) -> Dict[str, Any]:
 
         # Campos de ubicación
         "municipio": extraer_municipio(texto),
-
-        # Listas de identificadores
-        "curps": extraer_curp_todos(texto),
 
         # Campos de poder/instrumento (SOLO para uso interno - NO en raíz del JSON final)
         "numero_instrumento_poder": extraer_numero_instrumento_poder(texto),

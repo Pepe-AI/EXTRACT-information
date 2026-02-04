@@ -33,7 +33,7 @@ NO_ENCONTRADO = None  # Valor por defecto cuando no se encuentra un dato
 CAMPOS_RAIZ_PERMITIDOS = {
     "numero_escritura", "fecha_documento", "numero_notaria",
     "municipio", "nombre_notario", "tipo_titular",
-    "titulares", "adquirientes", "monto_operacion", "valor_catastral", "curps"
+    "titulares", "adquirientes", "monto_operacion", "valor_catastral"
 }
 
 CAMPOS_TITULAR_PERMITIDOS = {
@@ -440,7 +440,6 @@ EJEMPLO_JSON_EMPRESA = {
     ],
     "monto_operacion": "$8,654.00",
     "valor_catastral": None,
-    "curps": []
 }
 
 EJEMPLO_JSON_EMPRESA_2 = {
@@ -478,7 +477,6 @@ EJEMPLO_JSON_EMPRESA_2 = {
     ],
     "monto_operacion": "$3,100,000.00",
     "valor_catastral": None,
-    "curps": []
 }
 
 EJEMPLO_JSON_PERSONA = {
@@ -511,7 +509,6 @@ EJEMPLO_JSON_PERSONA = {
     ],
     "monto_operacion": "$1,200,000.00",
     "valor_catastral": "$950,000.00",
-    "curps": []
 }
 
 
@@ -658,7 +655,6 @@ PLANTILLA JSON (campos obligatorios):
     ],
     "monto_operacion": "$X,XXX.XX",
     "valor_catastral": null,
-    "curps": []
 }
 
 REGLAS CRÍTICAS:
@@ -795,7 +791,6 @@ TIPO DE TITULAR CONFIRMADO: {tipo_titular.upper() if tipo_titular else 'NO ESPEC
     ],
     "monto_operacion": "...",
     "valor_catastral": null,
-    "curps": []
 }}
 
 """
