@@ -1,6 +1,29 @@
 """
 extraction/segmentador.py - Segmentador de documentos (Plan D)
 
+⚠️ OBSOLETO - USAR extraction/segmentador_v2.py INSTEAD
+========================================================
+
+DEPRECADO: Este archivo ha sido reemplazado por segmentador_v2.py que usa
+el mapeo oficial de campos → secciones basado en la tabla proporcionada.
+
+RAZÓN DEL CAMBIO:
+================
+- segmentador_v2.py usa mapeo oficial de secciones (models/seccion_mapping.py)
+- Mayor precisión con patrones de títulos estándar
+- Búsqueda dirigida: cada campo solo se busca en su sección correcta
+- Reduce ambigüedad (ej: numero_escritura del documento vs del poder)
+
+MANTENER ESTE ARCHIVO:
+======================
+Se mantiene como respaldo temporal pero NO DEBE USARSE en código nuevo.
+Será eliminado en futuras versiones una vez validado segmentador_v2.py.
+
+---
+
+DOCUMENTACIÓN ORIGINAL:
+=======================
+
 PROPÓSITO:
 ==========
 Divide el documento en secciones para procesamiento más preciso.

@@ -85,10 +85,13 @@ class SistemaConfianza:
     def agregar_regex(self, datos_regex: Dict[str, Any]):
         """
         Agrega resultados de la extracción por regex.
-        
+
         Los datos de regex tienen PRIORIDAD MÁXIMA porque
         son determinísticos y más confiables para campos estructurados.
-        
+
+        EXCEPCIÓN: monto_operacion tiene confianza MEDIA (puede confundir
+        con valor catastral, impuestos, etc.)
+
         Args:
             datos_regex: Diccionario con datos extraídos por regex
         """
@@ -96,8 +99,16 @@ class SistemaConfianza:
             # Solo agregar si tiene valor válido
             if valor not in VALORES_INVALIDOS:
                 self._datos[nombre] = valor
-                self._confianza[nombre] = NivelConfianza.ALTA
-                self._origen[nombre] = OrigenDato.REGEX
+
+                # EXCEPCIÓN: monto_operacion tiene confianza MEDIA en REGEX
+                # (puede confundir valor catastral, impuestos, gastos, etc.)
+                if nombre == "monto_operacion":
+                    self._confianza[nombre] = NivelConfianza.MEDIA
+                    self._origen[nombre] = OrigenDato.REGEX
+                    print(f"   📊 REGEX extrajo monto_operacion: {valor} (confianza MEDIA - requiere verificación)")
+                else:
+                    self._confianza[nombre] = NivelConfianza.ALTA
+                    self._origen[nombre] = OrigenDato.REGEX
     
     def agregar_llm(self, datos_llm: Dict[str, Any]):
         """

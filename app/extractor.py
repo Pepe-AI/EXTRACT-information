@@ -593,6 +593,14 @@ class EscrituraExtractor:
                     if nivel in ["media", "baja"]
                 ]
 
+                # FORZAR inclusión de monto_operacion si existe y no tiene ALTA confianza
+                # (REGEX puede haber extraído valor catastral o impuesto en lugar del precio)
+                if "monto_operacion" in resultado_confianza.datos:
+                    if resultado_confianza.confianza.get("monto_operacion") != "alta":
+                        if "monto_operacion" not in campos_media_baja:
+                            campos_media_baja.append("monto_operacion")
+                            print(f"   📍 Forzando verificación de monto_operacion con Gemini Fallback Global")
+
                 if campos_media_baja:
                     print(f"   Campos con MEDIA/BAJA confianza: {campos_media_baja}")
 
@@ -1266,45 +1274,68 @@ class EscrituraExtractor:
                             print(f"   ✅ Adquiriente[{i}].representante ← Gemini (null)")
 
                     # Gemini también puede traer estado_civil
-                    if gemini_adq.get("estado_civil"):
+                    if "estado_civil" in gemini_adq and gemini_adq["estado_civil"] not in [None, False, ""]:
                         deepseek_adq["estado_civil"] = gemini_adq["estado_civil"]
-                        print(f"   ✅ Adquiriente[{i}].estado_civil ← Gemini")
+                        print(f"   ✅ Adquiriente[{i}].estado_civil ← Gemini ({gemini_adq['estado_civil']})")
 
                     # Gemini también puede traer tipo_sociedad
-                    if gemini_adq.get("tipo_sociedad"):
+                    if "tipo_sociedad" in gemini_adq and gemini_adq["tipo_sociedad"] not in [None, False, ""]:
                         deepseek_adq["tipo_sociedad"] = gemini_adq["tipo_sociedad"]
-                        print(f"   ✅ Adquiriente[{i}].tipo_sociedad ← Gemini")
+                        print(f"   ✅ Adquiriente[{i}].tipo_sociedad ← Gemini ({gemini_adq['tipo_sociedad']})")
 
                     # Gemini también puede traer edad
-                    if gemini_adq.get("edad"):
+                    if "edad" in gemini_adq and gemini_adq["edad"] not in [None, False, ""]:
                         deepseek_adq["edad"] = gemini_adq["edad"]
-                        print(f"   ✅ Adquiriente[{i}].edad ← Gemini")
+                        print(f"   ✅ Adquiriente[{i}].edad ← Gemini ({gemini_adq['edad']})")
 
                     # Gemini también puede traer rfc
-                    if gemini_adq.get("rfc"):
+                    if "rfc" in gemini_adq and gemini_adq["rfc"] not in [None, False, ""]:
                         deepseek_adq["rfc"] = gemini_adq["rfc"]
-                        print(f"   ✅ Adquiriente[{i}].rfc ← Gemini")
+                        print(f"   ✅ Adquiriente[{i}].rfc ← Gemini ({gemini_adq['rfc']})")
 
                     # Gemini también puede traer curp
-                    if gemini_adq.get("curp"):
+                    if "curp" in gemini_adq and gemini_adq["curp"] not in [None, False, ""]:
                         deepseek_adq["curp"] = gemini_adq["curp"]
-                        print(f"   ✅ Adquiriente[{i}].curp ← Gemini")
+                        print(f"   ✅ Adquiriente[{i}].curp ← Gemini ({gemini_adq['curp']})")
 
             else:
                 # DeepSeek no tiene adquirientes, crear desde Gemini
                 resultado["adquirientes"] = []
                 for gemini_adq in gemini_adquirientes_list:
-                    resultado["adquirientes"].append({
+                    nuevo_adq = {
                         "nombre": gemini_adq.get("nombre"),
                         "tipo": gemini_adq.get("tipo"),
                         "actua_por": "representación" if gemini_adq.get("representante") else "derecho propio",
-                        "estado_civil": gemini_adq.get("estado_civil"),
                         "representante": gemini_adq.get("representante"),
-                        "rfc": gemini_adq.get("rfc", False),
-                        "curp": gemini_adq.get("curp", False),
-                        "tipo_sociedad": gemini_adq.get("tipo_sociedad"),
-                        "edad": gemini_adq.get("edad"),
-                    })
+                    }
+
+                    # Solo agregar campos opcionales si tienen valor real (no false)
+                    if gemini_adq.get("estado_civil") not in [None, False, ""]:
+                        nuevo_adq["estado_civil"] = gemini_adq["estado_civil"]
+                    else:
+                        nuevo_adq["estado_civil"] = False
+
+                    if gemini_adq.get("rfc") not in [None, False, ""]:
+                        nuevo_adq["rfc"] = gemini_adq["rfc"]
+                    else:
+                        nuevo_adq["rfc"] = False
+
+                    if gemini_adq.get("curp") not in [None, False, ""]:
+                        nuevo_adq["curp"] = gemini_adq["curp"]
+                    else:
+                        nuevo_adq["curp"] = False
+
+                    if gemini_adq.get("tipo_sociedad") not in [None, False, ""]:
+                        nuevo_adq["tipo_sociedad"] = gemini_adq["tipo_sociedad"]
+                    else:
+                        nuevo_adq["tipo_sociedad"] = False
+
+                    if gemini_adq.get("edad") not in [None, False, ""]:
+                        nuevo_adq["edad"] = gemini_adq["edad"]
+                    else:
+                        nuevo_adq["edad"] = False
+
+                    resultado["adquirientes"].append(nuevo_adq)
                 print(f"   ✅ {len(gemini_adquirientes_list)} Adquiriente(s) completo(s) ← Gemini (DeepSeek no lo tenía)")
 
         # ====================================================================
@@ -1315,9 +1346,16 @@ class EscrituraExtractor:
             resultado["municipio"] = gemini_data["municipio"]
             print(f"   ✅ Municipio ← Gemini")
 
+        # PRIORIDAD ALTA: Gemini para monto_operacion (más preciso que REGEX/DeepSeek)
+        # Gemini busca en CLÁUSULA SEGUNDA específicamente, REGEX puede confundir con valor catastral
         if "monto_operacion" in gemini_data and gemini_data["monto_operacion"]:
+            # Siempre sobrescribir con Gemini (incluso si hay valor de REGEX/DeepSeek)
+            valor_anterior = resultado.get("monto_operacion")
             resultado["monto_operacion"] = gemini_data["monto_operacion"]
-            print(f"   ✅ Monto ← Gemini")
+            if valor_anterior and valor_anterior != gemini_data["monto_operacion"]:
+                print(f"   ✅ Monto ← Gemini (PRIORIDAD) - Reemplazó: {valor_anterior}")
+            else:
+                print(f"   ✅ Monto ← Gemini (PRIORIDAD)")
 
         # ====================================================================
         # MERGE DE DATOS DEL PODER (escritura/fecha_poder) en representantes

@@ -195,18 +195,18 @@ class GeminiFallbackService:
         campos_baja_confianza: List[str],
         datos_actuales: Dict[str, Any]
     ) -> str:
-        """Construye prompt estructurado para Gemini."""
+        """Construye prompt estructurado para Gemini con búsqueda dirigida por sección."""
 
-        # Mapeo de campos a descripciones
+        # Mapeo MEJORADO de campos a descripciones con ubicación de sección
         DESCRIPCIONES_CAMPOS = {
-            "numero_escritura": "Número de la escritura pública (4-7 dígitos)",
-            "numero_notaria": "Número de la notaría (1-3 dígitos)",
-            "nombre_notario": "Nombre completo del notario público",
-            "fecha_documento": "Fecha del documento en formato legible",
-            "monto_operacion": "Monto de la operación en formato $X,XXX.XX",
-            "municipio": "Municipio donde se encuentra la notaría",
-            "titulares": "Lista de titulares/vendedores con nombre, tipo, actua_por, representante",
-            "adquirientes": "Lista de adquirientes/compradores con nombre, tipo, actua_por, estado_civil, representante",
+            "numero_escritura": "Número de la escritura pública (4-7 dígitos) - SECCIÓN: Introducción/Encabezado",
+            "numero_notaria": "Número de la notaría (1-3 dígitos) - SECCIÓN: Introducción",
+            "nombre_notario": "Nombre completo del notario público - SECCIÓN: Introducción",
+            "fecha_documento": "Fecha del documento - SECCIÓN: Introducción",
+            "monto_operacion": "Monto de la operación ($X,XXX.XX) - SECCIÓN: Cláusula Segunda",
+            "municipio": "Municipio donde se encuentra la notaría - SECCIÓN: Introducción",
+            "titulares": "Lista de titulares/vendedores - SECCIÓN: Cláusula Primera (Comparecencia)",
+            "adquirientes": "Lista de adquirientes/compradores con RFC/CURP/edad - SECCIONES: Cláusula Primera (nombres) + Generales/FE NOTARIAL (RFC/CURP/edad AL FINAL)",
         }
 
         # Construir lista de campos solicitados
@@ -218,7 +218,7 @@ class GeminiFallbackService:
         # Construir estructura JSON esperada
         estructura_json = {}
         for campo in campos_baja_confianza:
-            if campo in ["titulares", "adquirientes"]:
+            if campo == "titulares":
                 estructura_json[campo] = [
                     {
                         "nombre": "...",
@@ -229,7 +229,26 @@ class GeminiFallbackService:
                             "en_calidad": "...",
                             "escritura": "...",
                             "fecha_poder": "..."
-                        } if campo == "adquirientes" else None
+                        }
+                    }
+                ]
+            elif campo == "adquirientes":
+                estructura_json[campo] = [
+                    {
+                        "nombre": "...",
+                        "tipo": "empresa o persona",
+                        "actua_por": "...",
+                        "estado_civil": "... o false",
+                        "rfc": "... o false",
+                        "curp": "... o false",
+                        "edad": "X o false",
+                        "tipo_sociedad": "... o false",
+                        "representante": {
+                            "nombre": "...",
+                            "en_calidad": "...",
+                            "escritura": "...",
+                            "fecha_poder": "..."
+                        }
                     }
                 ]
             else:
@@ -247,16 +266,43 @@ CONTEXTO (datos ya extraídos):
 ==============================
 {json.dumps(datos_actuales, indent=2, ensure_ascii=False)[:500]}...
 
+═══════════════════════════════════════════════════════════════
+⚠️ UBICACIÓN DE CAMPOS POR SECCIÓN (CRÍTICO)
+═══════════════════════════════════════════════════════════════
+
+ESTRUCTURA DEL DOCUMENTO:
+1. INTRODUCCIÓN/ENCABEZADO (primeras páginas)
+   → numero_escritura, fecha_documento, numero_notaria, municipio, nombre_notario
+
+2. CLÁUSULA PRIMERA (Comparecencia)
+   → titulares.nombre, adquirientes.nombre, representantes
+
+3. CLÁUSULA SEGUNDA (Operación)
+   → monto_operacion, valor_catastral
+
+4. PERSONALIDAD (Poderes notariales)
+   → representante.escritura, representante.fecha_poder
+
+5. GENERALES / FE NOTARIAL (AL FINAL del documento)
+   → RFC, CURP, edad, estado_civil, tipo_sociedad
+
+⚠️ IMPORTANTE:
+- Los RFC, CURP y edad están SOLO en la sección FINAL (FE NOTARIAL, COMPARECIENTES, DOY FE)
+- NO están al inicio del documento
+- El numero_escritura del DOCUMENTO está en Introducción
+- El numero_escritura del PODER está en Personalidad (son diferentes)
+
 TEXTO DEL DOCUMENTO:
 ====================
-{texto_ocr[:3000]}
+{texto_ocr}
 
 INSTRUCCIONES:
 ==============
 1. Busca CUIDADOSAMENTE cada campo en el texto original
 2. Si encuentras el campo, extráelo con PRECISIÓN
-3. Si NO encuentras el campo, deja el valor como null
+3. Si NO encuentras el campo, deja el valor como null o false (según corresponda)
 4. NO inventes datos que no estén en el texto
+5. Para RFC/CURP/edad: busca en la sección FE NOTARIAL al FINAL del documento
 5. Respeta los formatos especificados
 
 RESPONDE SOLO CON JSON EN ESTE FORMATO:

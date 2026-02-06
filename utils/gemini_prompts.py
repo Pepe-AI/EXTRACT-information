@@ -299,6 +299,24 @@ Patrones:
 - "escritura X otorgada el Y"
 - "poder otorgado mediante escritura X del Y"
 
+═══════════════════════════════════════════════════════════════
+⚠️ UBICACIÓN CRÍTICA DE RFC, CURP, EDAD, TIPO_SOCIEDAD
+═══════════════════════════════════════════════════════════════
+
+Estos campos están en la SECCIÓN FINAL del documento (después de la descripción del inmueble):
+
+🔍 Busca en estas secciones:
+- "FE NOTARIAL"
+- "COMPARECIENTES"
+- "DOY FE"
+- "CERTIFICACIONES"
+
+Los RFC/CURP/edad/tipo_sociedad NO están en las primeras páginas del documento.
+Están AL FINAL, en la sección donde el notario certifica la identidad de las personas.
+
+Ejemplo de formato típico:
+"DOY FE que identifiqué a [NOMBRE], con RFC [RFC], CURP [CURP], de [edad] años de edad..."
+
 PLANTILLA DE RESPUESTA (JSON):
 ==============================
 
@@ -313,23 +331,21 @@ PLANTILLA DE RESPUESTA (JSON):
       "fecha_poder": "15/4/2020"
     }}
   }},
-  "adquirientes": [
-    {{
-      "nombre": "NOMBRE COMPRADOR 1",
-      "tipo": "empresa" o "persona",
-      "estado_civil": "..." o false,
-      "rfc": "..." o false,
-      "curp": "..." o false,
-      "edad": X o false,
-      "tipo_sociedad": "..." o false,
-      "representante": null o {{
-        "nombre": "NOMBRE REPRESENTANTE",
-        "en_calidad": "cargo",
-        "escritura": null,
-        "fecha_poder": null
-      }}
+  "adquiriente": {{
+    "nombre": "NOMBRE COMPRADOR 1",
+    "tipo": "empresa" o "persona",
+    "estado_civil": "..." o false,
+    "rfc": "..." o false,
+    "curp": "..." o false,
+    "edad": X o false,
+    "tipo_sociedad": "..." o false,
+    "representante": null o {{
+      "nombre": "NOMBRE REPRESENTANTE",
+      "en_calidad": "cargo",
+      "escritura": null,
+      "fecha_poder": null
     }}
-  ],
+  }},
   "municipio": "NOMBRE MUNICIPIO" o null,
   "monto_operacion": "$X,XXX.XX" o null
 }}
@@ -341,9 +357,11 @@ REGLAS IMPORTANTES:
 - Si es PERSONA sin apoderado → representante: null
 - Si hay MÚLTIPLES representantes mencionados → toma SOLO EL PRIMERO
 - TITULAR: SOLO extrae nombre, tipo, representante (NO rfc, curp, edad, estado_civil, tipo_sociedad)
-- ADQUIRIENTES: SIEMPRE retorna como ARRAY (incluso si es solo 1 persona)
-- Si hay MÚLTIPLES ADQUIRIENTES (ejemplo: "ANTONIO y SILVIA") → crea un objeto separado para CADA UNO
-- Extrae rfc, curp, edad, estado_civil, tipo_sociedad de CADA adquiriente SOLO SI APARECEN (sino usa false)
+- ADQUIRIENTE: SIEMPRE retorna como OBJETO SINGULAR (NO como array)
+- Si hay MÚLTIPLES ADQUIRIENTES (ejemplo: "ANTONIO y SILVIA") → menciona SOLO AL PRIMERO en el objeto singular
+- 🔍 RFC, CURP, EDAD, TIPO_SOCIEDAD: Busca en la SECCIÓN FINAL del documento (FE NOTARIAL, COMPARECIENTES, DOY FE)
+- NO busques RFC/CURP/edad en las primeras páginas, están AL FINAL donde el notario certifica identidades
+- Extrae rfc, curp, edad, estado_civil, tipo_sociedad del adquiriente SOLO SI APARECEN (sino usa false)
 - Usa null para representante/municipio/monto, usa false para campos de adquiriente que no existan
 - Municipio del INMUEBLE, NO de la notaría
 - Monto de VENTA, NO impuestos
