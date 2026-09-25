@@ -37,3 +37,10 @@ debug_*.py
 
 #carpeta
 /o
+# Salidas OCR / dumps de pruebas
+ocr_output.txt
+texto_ocr.txt
+test_response_*.json
+
+# Worktrees de Claude
+.claude/worktrees/
